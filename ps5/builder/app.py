@@ -312,6 +312,10 @@ class Window(QWidget):
         self.data_folder = QCheckBox("Game data as a folder (loose files, for mods): takes 2-3x the room on exFAT drives")
         self.data_folder.setChecked(str(self.settings.value("data_folder", "false")).lower() == "true")
         grid.addWidget(self.data_folder, 3, 1, 1, 4)
+        # (the shaders of known_gpu_hangs.txt left out, RX_VK_GPU_SKIP in longshot_env.txt: on unless turned off)
+        self.known_skips = QCheckBox("Skip shaders known to hang the GPU (what they draw there is missing)")
+        self.known_skips.setChecked(str(self.settings.value("known_skips", "true")).lower() == "true")
+        grid.addWidget(self.known_skips, 4, 1, 1, 4)
         grid.setColumnStretch(1, 2)
         grid.setColumnStretch(3, 2)
 
@@ -431,7 +435,8 @@ class Window(QWidget):
             self.out.setText(path)
 
     def busy(self, on):
-        for w in (self.game, self.game_pick, self.out, self.out_pick, self.jobs, self.memory, self.model, self.data_folder):
+        for w in (self.game, self.game_pick, self.out, self.out_pick, self.jobs, self.memory, self.model, self.data_folder,
+                  self.known_skips):
             w.setEnabled(not on)
         self.go.setText("Stop Build" if on else "Build Title")
         self.go.setObjectName("StopBtn" if on else "PrimaryBtn")
@@ -457,7 +462,7 @@ class Window(QWidget):
             QMessageBox.warning(self, "No console", "Choose your console: PS5 / PS5 Slim, or PS5 Pro.")
             return
         for k, v in (("game", game), ("out", out), ("jobs", self.jobs.value()), ("memory", self.memory.currentData()), ("model", model),
-                     ("data_folder", self.data_folder.isChecked())):
+                     ("data_folder", self.data_folder.isChecked()), ("known_skips", self.known_skips.isChecked())):
             self.settings.setValue(k, v)
         os.makedirs(out, exist_ok=True)
         self.log.clear()
@@ -477,6 +482,8 @@ class Window(QWidget):
             args += ["--memory", str(self.memory.currentData())]
         if self.data_folder.isChecked():
             args += ["--data-folder"]
+        if not self.known_skips.isChecked():
+            args += ["--no-known-skips"]
         self.error = ""
         self.proc = Build(args)
         self.proc.line.connect(self.line)

@@ -1,0 +1,11 @@
+# Shaders known to hang the PS5's GPU. The builder writes their keys into the title folder's longshot_env.txt as
+# RX_VK_GPU_SKIP=<key>,... (ps5/builder/pipeline.py known_gpu_hangs), and the game leaves their draws and dispatches out
+# (gpu/vk/gpu_skip.h), so play goes on past the places they stopped it; what each one draws or computes is missing there.
+# The builder's "Skip shaders known to hang the GPU" (on by default; --no-known-skips) leaves this list out, to see them run
+# again or to catch one with the shader probe (RX_VK_PROBE_PROG, docs/development.md).
+#
+# One shader a line: its program key (16 hex digits, the prog_key of a GPU_FREEZE_2S line in logs/crash_trace.txt, as the
+# Debug tab's GPU freeze shader row names it), then anything after it is a note. A line starting with # is a note.
+#
+# key              kind     where it stops the GPU                                     seen
+53fcaee4dc45c6ee   compute  the Monster Coliseum after ~30 s, and a cutscene (RDNA 2)   2026-11-24, base PS5, twice in the cutscene

@@ -23,17 +23,53 @@ inline std::atomic<uint64_t> keys[kMax];
 inline std::atomic<int> count{0};
 inline std::mutex edit_mu;
 
-inline bool contains(uint64_t key) {
+/// The builder's list (ps5/builder/known_gpu_hangs.txt, written into longshot_env.txt as RX_VK_GPU_SKIP=<key>,...): the
+/// shaders known to hang the GPU, left out from the start of every run. Read once, never changed after; not written to the
+/// ini, so the line taken out of longshot_env.txt draws them again. keys_in parses the same text as from_text
+inline std::vector<uint64_t> keys_in(const char* text) {
+    std::vector<uint64_t> out;
+    for (const char* q = text; q && *q;) {
+        while (*q == ',' || *q == ' ' || *q == '\t') q++;
+        const char* e = q;
+        while ((*e >= '0' && *e <= '9') || (*e >= 'a' && *e <= 'f') || (*e >= 'A' && *e <= 'F')) e++;
+        if (e - q == 16) {
+            const uint64_t k = strtoull(std::string(q, 16).c_str(), nullptr, 16);
+            bool seen = !k;
+            for (const uint64_t o : out) seen |= o == k;
+            if (!seen) out.push_back(k);
+        }
+        while (*e && *e != ',' && *e != ' ' && *e != '\t') e++;   // (the rest of a malformed key)
+        q = e;
+    }
+    return out;
+}
+inline const std::vector<uint64_t>& from_build() {
+    static const std::vector<uint64_t> list = keys_in(getenv("RX_VK_GPU_SKIP"));
+    return list;
+}
+/// (the Skipped shaders row's Enter: the builder's list drawn again too, for this run)
+inline std::atomic<bool> build_off{false};
+inline bool from_build_has(uint64_t key) {
+    if (build_off.load(std::memory_order_relaxed)) return false;
+    for (const uint64_t k : from_build())
+        if (k == key) return true;
+    return false;
+}
+
+/// (the player's list only: the one add, clear and the ini work on)
+inline bool mine_has(uint64_t key) {
     const int n = count.load(std::memory_order_acquire);
     for (int i = 0; i < n; i++)
         if (keys[i].load(std::memory_order_relaxed) == key) return true;
     return false;
 }
 
-/// false when it is there already, or the list is full
+inline bool contains(uint64_t key) { return mine_has(key) || from_build_has(key); }
+
+/// false when the player's list has it already, or is full
 inline bool add(uint64_t key) {
     std::lock_guard lk(edit_mu);
-    if (!key || contains(key)) return false;
+    if (!key || mine_has(key)) return false;
     const int n = count.load(std::memory_order_relaxed);
     if (n >= kMax) return false;
     keys[n].store(key, std::memory_order_relaxed);
@@ -41,10 +77,30 @@ inline bool add(uint64_t key) {
     return true;
 }
 
-/// every program drawn again (a draw already reading the old count may still leave one out: harmless)
+/// The player's own list emptied (a draw already reading the old count may still leave one out: harmless)
 inline void clear() {
     std::lock_guard lk(edit_mu);
     count.store(0, std::memory_order_release);
+}
+
+/// (the Skipped shaders row's Enter) every program drawn again: the player's list emptied and saved so, the builder's
+/// left aside until the next start
+inline void restore_all() {
+    clear();
+    build_off.store(true, std::memory_order_relaxed);
+}
+
+/// How many are left out now: the player's and the builder's
+inline int total() {
+    int n = count.load(std::memory_order_acquire);
+    if (!build_off.load(std::memory_order_relaxed))
+        for (const uint64_t k : from_build()) {
+            bool mine = false;
+            for (int i = 0, m = count.load(std::memory_order_acquire); i < m; i++)
+                mine |= keys[i].load(std::memory_order_relaxed) == k;
+            n += !mine;
+        }
+    return n;
 }
 
 inline std::vector<uint64_t> list() {
@@ -69,14 +125,28 @@ inline std::string to_text() {
 /// the ini's value: keys of 16 hex digits, separated by commas or spaces; anything else is passed over
 inline void from_text(const char* text) {
     clear();
-    for (const char* q = text; q && *q;) {
-        while (*q == ',' || *q == ' ' || *q == '\t') q++;
-        const char* e = q;
-        while ((*e >= '0' && *e <= '9') || (*e >= 'a' && *e <= 'f') || (*e >= 'A' && *e <= 'F')) e++;
-        if (e - q == 16) add(strtoull(std::string(q, 16).c_str(), nullptr, 16));
-        while (*e && *e != ',' && *e != ' ' && *e != '\t') e++;   // (the rest of a malformed key)
-        q = e;
-    }
+    for (const uint64_t k : keys_in(text)) add(k);
+}
+
+/// (the Skipped shaders row's line) every key left out now, the builder's marked so: "53fcaee4dc45c6ee (build), ..."
+inline std::string describe() {
+    std::string out;
+    char hex[20];
+    const std::vector<uint64_t> mine = list();
+    const auto put = [&](uint64_t k, const char* tag) {
+        snprintf(hex, sizeof hex, "%016llx", (unsigned long long)k);
+        if (!out.empty()) out += ", ";
+        out += hex;
+        out += tag;
+    };
+    for (const uint64_t k : mine) put(k, "");
+    if (!build_off.load(std::memory_order_relaxed))
+        for (const uint64_t k : from_build()) {
+            bool listed = false;
+            for (const uint64_t m : mine) listed |= m == k;
+            if (!listed) put(k, " (build)");
+        }
+    return out;
 }
 
 /// The program the GPU was running when it last stopped presenting, in a run before this one
