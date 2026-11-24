@@ -122,7 +122,7 @@ SCE_SYSTEM_PARAM_LANG numbers: 1 English (US), 17 Portuguese (Brazil), 12 Finnis
 | ps5debug-NG | port `744` |
 | klogsrv (kernel log) | port `3232` |
 | ELF loader | port `9021` |
-| Game | `/data/longshotplus/roms/`, The Legend of Zelda: Ocarina of Time as a `.nup` (program `0400486024DEC000`, update v131072) |
+| Game | `/data/homebrew/PPSA99198/Data/`: The Legend of Zelda: Ocarina of Time's romfs, extracted from its `.nup` (program `0400486024DEC000`, update v131072) by the builder |
 
 On 2026-11-15 only the ELF loader answered: FTP, ps5debug-NG and klogsrv have to be loaded before a test run.
 

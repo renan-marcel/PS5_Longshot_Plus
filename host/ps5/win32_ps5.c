@@ -848,78 +848,6 @@ __attribute__((constructor)) void hos_ps5_clock_init(void) {
     fprintf(stderr, "[ps5] clock: the time stamp counter at %llu Hz\n", (unsigned long long)hz);
 }
 
-/* The game's package on the console: HOS_PS5_NUP, else the copy an emulator there already keeps, so one 25 GB file serves
-   both: EglantinePS5's folder (under the name its dump has), PS5_Lichii's, then the one that had before 2026-11-10 (when
-   none is there, the first, for the message). */
-static int ps5_is_oot_nup(const char *path) {
-    FILE *f = fopen(path, "rb");
-    if (!f) return 0;
-    char hdr[16384];
-    size_t got = fread(hdr, 1, sizeof hdr - 1, f);
-    fclose(f);
-    if (got < 16) return 0;
-    for (size_t i = 0; i + 16 <= got; i++) {
-        if (strncasecmp(hdr + i, "0400486024dec000", 16) == 0) return 1;
-    }
-    return 0;
-}
-static int ps5_find_any_nup_in_dir(const char *dir, char *out, size_t out_sz) {
-    DIR *d = opendir(dir);
-    if (!d) return 0;
-    struct dirent *de;
-    while ((de = readdir(d)) != NULL) {
-        const char *name = de->d_name;
-        if (name[0] == '.') continue;
-        size_t len = strlen(name);
-        if (len > 4 && strcasecmp(name + len - 4, ".nup") == 0) {
-            int n = snprintf(out, out_sz, "%s/%s", dir, name);
-            if (n > 0 && (size_t)n < out_sz && access(out, R_OK) == 0 && ps5_is_oot_nup(out)) {
-                closedir(d);
-                return 1;
-            }
-        }
-    }
-    closedir(d);
-    return 0;
-}
-const char *hos_ps5_nup(void) {
-    static char discovered[PATH_MAX];
-    static const char *const scan_dirs[] = {
-        "/data/longshotplus/roms",
-        "/data/longshot/roms",
-        "/data/eglantineps5/roms"
-    };
-    static const char *const places[] = {
-        "/data/longshotplus/roms/oot.nup",
-        "/data/longshot/roms/oot.nup",
-        "/data/eglantineps5/roms/The Legend of Zelda Ocarina of Time [0400486024dec000][v131072].nup",
-        "/data/eglantineps5/roms/oot.nup", "/data/lichii/roms/oot/oot.nup", "/data/prosperoeden/roms/oot/oot.nup"};
-    const char *set = getenv("HOS_PS5_NUP");
-    if (set && *set) return set;
-    for (size_t i = 0; i < sizeof scan_dirs / sizeof *scan_dirs; i++)
-        if (ps5_find_any_nup_in_dir(scan_dirs[i], discovered, sizeof discovered)) return discovered;
-    for (size_t i = 0; i < sizeof places / sizeof *places; i++)
-        if (access(places[i], R_OK) == 0) return places[i];
-    return places[0];
-}
-static double file_probe_read_gap;
-static void *file_probe_read(void *unused) {   /* (the game's own reads: 64 KiB pieces of its package, here and there) */
-    (void)unused;
-    const char *nup = hos_ps5_nup();
-    FILE *f = fopen(nup, "rb");
-    if (!f) return NULL;
-    static char piece[65536];
-    uint64_t at = 12345;
-    while (!file_probe_stop) {
-        at = at * 6364136223846793005ull + 1442695040888963407ull;
-        const double t = now_ms();
-        fseeko(f, (off_t)((at >> 20) % (20ull << 30)) & ~(off_t)0xffff, SEEK_SET);
-        if (fread(piece, 1, sizeof piece, f) == 0) clearerr(f);
-        if (now_ms() - t > file_probe_read_gap) file_probe_read_gap = now_ms() - t;
-    }
-    fclose(f);
-    return NULL;
-}
 static void file_probe_at(const char *dir) {
     char path[256], tmp[256];
     snprintf(path, sizeof path, "%s/probe-file.bin", dir);
@@ -929,14 +857,9 @@ static void file_probe_at(const char *dir) {
     if (!data) return;
     memset(data, 0x5a, n);
     file_probe_stop = 0, file_probe_gap[0] = file_probe_gap[1] = 0;
-    pthread_t a, b, c;
-    file_probe_read_gap = 0;
+    pthread_t a, b;
     pthread_create(&a, NULL, file_probe_cpu, NULL);
     pthread_create(&b, NULL, file_probe_open, NULL);
-    pthread_create(&c, NULL, file_probe_read, NULL);
-    { struct timespec warm = {0, 300000000}; nanosleep(&warm, NULL); }
-    const double idle_read = file_probe_read_gap;
-    file_probe_read_gap = 0;
     const double t0 = now_ms();
     FILE *f = fopen(tmp, "wb");
     const double t1 = now_ms();
@@ -951,10 +874,7 @@ static void file_probe_at(const char *dir) {
     file_probe_stop = 1;
     pthread_join(a, NULL);
     pthread_join(b, NULL);
-    pthread_join(c, NULL);
     free(data);
-    fprintf(stderr, "[ps5] timing: a read of 64 KiB from the game's package: %.1f ms at most with nothing written, %.1f ms while "
-            "the 24 MB went to %s\n", idle_read, file_probe_read_gap, dir);
     fprintf(stderr, "[ps5] timing: 24 MB to %s: open %.1f ms, write %.1f, close %.1f, rename %.1f, unlink %.1f; meanwhile a "
             "computing thread paused %.1f ms at most, one opening a file in /app0 %.1f ms\n", dir, t1 - t0, t2 - t1, t3 - t2,
             t4 - t3, t5 - t4, file_probe_gap[0], file_probe_gap[1]);

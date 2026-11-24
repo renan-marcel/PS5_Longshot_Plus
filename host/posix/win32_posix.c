@@ -1051,11 +1051,12 @@ DWORD GetCurrentDirectoryA(DWORD cap, LPSTR out) {
 }
 
 /* ---- files ---- */
-#ifdef __PROSPERO__   /* (a file of the romfs in the game's .nup: fd -1, nup its handle, pos where read() goes on) */
-#include "../ps5/nup_romfs.h"
-typedef struct { HObj h; int fd; int64_t nup; uint64_t pos; } HFile;
-static HFile std_files[3] = {{{H_FILE}, 0, -1, 0}, {{H_FILE}, 1, -1, 0}, {{H_FILE}, 2, -1, 0}};
-#define NUP_FILE(f) ((f)->fd < 0 && (f)->nup >= 0)
+#ifdef __PROSPERO__   /* (a file of the game's data packs: fd the pack's, shared and never closed here; base where the
+                         file starts in it, size its size, pos where read() goes on: host/ps5/pak_romfs.h) */
+#include "../ps5/pak_romfs.h"
+typedef struct { HObj h; int fd; int pak; uint64_t base, size, pos; } HFile;
+static HFile std_files[3] = {{{H_FILE}, 0, 0, 0, 0, 0}, {{H_FILE}, 1, 0, 0, 0, 0}, {{H_FILE}, 2, 0, 0, 0, 0}};
+#define PAK_FILE(f) ((f)->pak)
 #else
 typedef struct { HObj h; int fd; } HFile;
 static HFile std_files[3] = {{{H_FILE}, 0}, {{H_FILE}, 1}, {{H_FILE}, 2}};
@@ -1119,11 +1120,17 @@ HANDLE IO_INNER(CreateFileA)(LPCSTR name, DWORD access, DWORD share, void *attr,
     char path[PATH_MAX];
     slashes(path, sizeof path, name);
 #ifdef __PROSPERO__
-    if (nup_romfs_path(path)) {
-        const int64_t n = (access & GENERIC_WRITE) ? -1 : nup_romfs_open_file(path);
-        if (n < 0) { last_error = (access & GENERIC_WRITE) ? ERROR_ACCESS_DENIED : ERROR_FILE_NOT_FOUND; return INVALID_HANDLE_VALUE; }
+    if (pak_romfs_path(path)) {
+        int dir = 0, fd = -1;
+        uint64_t base = 0, size = 0;
+        const int64_t node = pak_romfs_find(path, &dir, NULL);
+        if (node < 0) { last_error = ERROR_FILE_NOT_FOUND; return INVALID_HANDLE_VALUE; }
+        if (dir || (access & GENERIC_WRITE) || !pak_romfs_file(node, &fd, &base, &size)) {   /* (read only; no folder) */
+            last_error = ERROR_ACCESS_DENIED;
+            return INVALID_HANDLE_VALUE;
+        }
         HFile *f = (HFile *)calloc(1, sizeof *f);
-        f->h.type = H_FILE, f->fd = -1, f->nup = n;
+        f->h.type = H_FILE, f->fd = fd, f->pak = 1, f->base = base, f->size = size;
         return f;
     }
 #endif
@@ -1148,9 +1155,6 @@ HANDLE IO_INNER(CreateFileA)(LPCSTR name, DWORD access, DWORD share, void *attr,
     }
     HFile *f = (HFile *)calloc(1, sizeof *f);
     f->h.type = H_FILE, f->fd = fd;
-#ifdef __PROSPERO__
-    f->nup = -1;
-#endif
     return f;
 }
 IO_STATIC BOOL IO_INNER(ReadFile)(HANDLE h, void *buf, DWORD n, DWORD *got, OVERLAPPED *ov) {
@@ -1162,18 +1166,25 @@ IO_STATIC BOOL IO_INNER(ReadFile)(HANDLE h, void *buf, DWORD n, DWORD *got, OVER
     if (!is(h, H_FILE)) { last_error = ERROR_INVALID_HANDLE; return FALSE; }
     const int fd = ((HFile *)h)->fd;
     off_t at = ov ? (off_t)((uint64_t)ov->OffsetHigh << 32 | ov->Offset) : 0;
+    DWORD done = 0;
 #ifdef __PROSPERO__
-    if (NUP_FILE((HFile *)h)) {
+    if (PAK_FILE((HFile *)h)) {   /* (a span of its pack: positional reads only, so handles never share a position) */
         HFile *f = (HFile *)h;
-        const int64_t r = nup_romfs_pread(f->nup, buf, n, ov ? (uint64_t)at : f->pos);
-        if (r < 0) { last_error = ERROR_INVALID_PARAMETER; return FALSE; }
-        if (!ov) f->pos += (uint64_t)r;
-        if (got) *got = (DWORD)r;
-        if (ov && !r && n) { last_error = ERROR_HANDLE_EOF; return FALSE; }
+        const uint64_t from = ov ? (uint64_t)at : f->pos;
+        const DWORD want = from >= f->size ? 0 : f->size - from < n ? (DWORD)(f->size - from) : n;
+        while (done < want) {
+            const ssize_t r = pread(fd, (char *)buf + done, want - done, (off_t)(f->base + from + done));
+            if (r < 0 && errno == EINTR) continue;
+            if (r < 0) { if (got) *got = done; return fail_errno(); }
+            if (!r) break;
+            done += (DWORD)r;
+        }
+        if (!ov) f->pos = from + done;
+        if (got) *got = done;
+        if (ov && !done && n) { last_error = ERROR_HANDLE_EOF; return FALSE; }
         return TRUE;
     }
 #endif
-    DWORD done = 0;
     while (done < n) {
         const ssize_t r = ov ? pread(fd, (char *)buf + done, n - done, at + done) : read(fd, (char *)buf + done, n - done);
         if (r < 0 && errno == EINTR) continue;
@@ -1192,6 +1203,9 @@ IO_STATIC BOOL IO_INNER(WriteFile)(HANDLE h, const void *buf, DWORD n, DWORD *pu
     hos_ps5_commit_now((void *)buf, n);
 #endif
     if (!is(h, H_FILE)) { last_error = ERROR_INVALID_HANDLE; return FALSE; }
+#ifdef __PROSPERO__
+    if (PAK_FILE((HFile *)h)) { last_error = ERROR_ACCESS_DENIED; return FALSE; }
+#endif
     const int fd = ((HFile *)h)->fd;
     off_t at = ov ? (off_t)((uint64_t)ov->OffsetHigh << 32 | ov->Offset) : 0;
     DWORD done = 0;
@@ -1207,9 +1221,9 @@ IO_STATIC BOOL IO_INNER(WriteFile)(HANDLE h, const void *buf, DWORD n, DWORD *pu
 BOOL SetFilePointerEx(HANDLE h, LARGE_INTEGER dist, LARGE_INTEGER *pos, DWORD method) {
     if (!is(h, H_FILE)) { last_error = ERROR_INVALID_HANDLE; return FALSE; }
 #ifdef __PROSPERO__
-    if (NUP_FILE((HFile *)h)) {
+    if (PAK_FILE((HFile *)h)) {
         HFile *f = (HFile *)h;
-        const int64_t base = method == FILE_END ? (int64_t)nup_romfs_size(f->nup) : method == FILE_CURRENT ? (int64_t)f->pos : 0;
+        const int64_t base = method == FILE_END ? (int64_t)f->size : method == FILE_CURRENT ? (int64_t)f->pos : 0;
         if (base + dist.QuadPart < 0) { last_error = ERROR_INVALID_PARAMETER; return FALSE; }
         f->pos = (uint64_t)(base + dist.QuadPart);
         if (pos) pos->QuadPart = (LONGLONG)f->pos;
@@ -1223,7 +1237,7 @@ BOOL SetFilePointerEx(HANDLE h, LARGE_INTEGER dist, LARGE_INTEGER *pos, DWORD me
 }
 BOOL GetFileSizeEx(HANDLE h, LARGE_INTEGER *size) {
 #ifdef __PROSPERO__
-    if (is(h, H_FILE) && NUP_FILE((HFile *)h)) { size->QuadPart = (LONGLONG)nup_romfs_size(((HFile *)h)->nup); return TRUE; }
+    if (is(h, H_FILE) && PAK_FILE((HFile *)h)) { size->QuadPart = (LONGLONG)((HFile *)h)->size; return TRUE; }
 #endif
     struct stat st;
     if (!is(h, H_FILE) || fstat(((HFile *)h)->fd, &st)) { last_error = ERROR_INVALID_HANDLE; return FALSE; }
@@ -1238,6 +1252,9 @@ DWORD GetFileSize(HANDLE h, DWORD *high) {
 }
 BOOL SetEndOfFile(HANDLE h) {
     if (!is(h, H_FILE)) { last_error = ERROR_INVALID_HANDLE; return FALSE; }
+#ifdef __PROSPERO__
+    if (PAK_FILE((HFile *)h)) { last_error = ERROR_ACCESS_DENIED; return FALSE; }
+#endif
     const int fd = ((HFile *)h)->fd;
     const off_t at = lseek(fd, 0, SEEK_CUR);
     return at >= 0 && ftruncate(fd, at) == 0 ? TRUE : fail_errno();
@@ -1248,7 +1265,7 @@ IO_STATIC BOOL IO_INNER(FlushFileBuffers)(HANDLE h) {
 }
 DWORD GetFileType(HANDLE h) {
 #ifdef __PROSPERO__
-    if (is(h, H_FILE) && NUP_FILE((HFile *)h)) return FILE_TYPE_DISK;
+    if (is(h, H_FILE) && PAK_FILE((HFile *)h)) return FILE_TYPE_DISK;
 #endif
     struct stat st;
     if (!is(h, H_FILE) || fstat(((HFile *)h)->fd, &st)) return FILE_TYPE_UNKNOWN;
@@ -1267,9 +1284,9 @@ DWORD GetFileAttributesA(LPCSTR name) {
     char path[PATH_MAX];
     slashes(path, sizeof path, name);
 #ifdef __PROSPERO__
-    if (nup_romfs_path(path)) {
+    if (pak_romfs_path(path)) {
         int dir = 0;
-        if (nup_romfs_find(path, &dir, NULL) < 0) { last_error = ERROR_FILE_NOT_FOUND; return INVALID_FILE_ATTRIBUTES; }
+        if (pak_romfs_find(path, &dir, NULL) < 0) { last_error = ERROR_FILE_NOT_FOUND; return INVALID_FILE_ATTRIBUTES; }
         return dir ? FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_READONLY : FILE_ATTRIBUTE_READONLY;
     }
 #endif
@@ -1326,8 +1343,8 @@ BOOL CopyFileA(LPCSTR from, LPCSTR to, BOOL fail_if_exists) {
     close(in), close(out);
     return ok;
 }
-#ifdef __PROSPERO__   /* (a folder of the .nup's romfs: d NULL, nup_dir its node, cursor the next child) */
-typedef struct { HObj h; DIR *d; char dir[PATH_MAX], pat[256]; int64_t nup_dir; uint32_t cursor; } HFind;
+#ifdef __PROSPERO__   /* (a folder of the game's data packs: d NULL, pak_dir its node, cursor the next child) */
+typedef struct { HObj h; DIR *d; char dir[PATH_MAX], pat[256]; int64_t pak_dir; uint32_t cursor; } HFind;
 #else
 typedef struct { HObj h; DIR *d; char dir[PATH_MAX], pat[256]; } HFind;
 #endif
@@ -1338,7 +1355,7 @@ static BOOL find_next(HFind *f, WIN32_FIND_DATAA *fd) {
         size_t len;
         int dir;
         uint64_t size;
-        while (nup_romfs_dir_next(f->nup_dir, &f->cursor, &name, &len, &dir, &size)) {
+        while (pak_romfs_dir_next(f->pak_dir, &f->cursor, &name, &len, &dir, &size)) {
             char n[260];
             snprintf(n, sizeof n, "%.*s", (int)len, name);
             if (fnmatch(f->pat, n, FNM_CASEFOLD) && strcmp(f->pat, "*.*")) continue;
@@ -1387,10 +1404,10 @@ HANDLE FindFirstFileA(LPCSTR pattern, WIN32_FIND_DATAA *fd) {
         strcpy(f->dir, ".");
     }
 #ifdef __PROSPERO__
-    if (nup_romfs_path(f->dir)) {
+    if (pak_romfs_path(f->dir)) {
         int dir = 0;
-        f->nup_dir = nup_romfs_find(f->dir, &dir, NULL);
-        if (f->nup_dir < 0 || !dir) { last_error = ERROR_PATH_NOT_FOUND; free(f); return INVALID_HANDLE_VALUE; }
+        f->pak_dir = pak_romfs_find(f->dir, &dir, NULL);
+        if (f->pak_dir < 0 || !dir) { last_error = ERROR_PATH_NOT_FOUND; free(f); return INVALID_HANDLE_VALUE; }
         if (!find_next(f, fd)) { free(f); last_error = ERROR_FILE_NOT_FOUND; return INVALID_HANDLE_VALUE; }
         return f;
     }
@@ -1440,8 +1457,7 @@ BOOL CloseHandle(HANDLE h) {
     case H_TIMER: o->type = 0; free(o); return TRUE;
 #ifdef __PROSPERO__
     case H_FILE:
-        if (NUP_FILE((HFile *)h)) nup_romfs_close(((HFile *)h)->nup);
-        else close(((HFile *)h)->fd);
+        if (!PAK_FILE((HFile *)h)) close(((HFile *)h)->fd);   /* (a pack's fd stays open for every file in it) */
         o->type = 0, free(o);
         return TRUE;
 #else

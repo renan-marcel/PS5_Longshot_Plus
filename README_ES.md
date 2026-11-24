@@ -46,40 +46,39 @@ Todo tu progreso, perfiles, capturas de guardado y ajustes del juego se almacena
 
 ---
 
-## Detección Automática del Archivo `.nup` y Estructura de Carpetas en PS5
+## Carpeta de Datos del Juego (`Data/`) y Estructura de Carpetas en PS5
 
-En **`v0.3.3-plus`**, el juego ya **no depende de un único nombre de archivo fijo**: al arrancar, escanea automáticamente las carpetas compatibles en orden de prioridad y lee la cabecera de cada archivo `.nup` hasta verificar el *Title ID* oficial de *Ocarina of Time* (`0400486024DEC000`).
-
-### Orden de búsqueda automática en la PS5
-1. **`/data/longshotplus/roms/`** *(Ruta principal recomendada — acepta cualquier nombre terminado en `.nup`, por ejemplo `oot.nup` o `zelda_oot.nup`)*
-2. **`/data/longshot/roms/`** *(Respaldo automático)*
-3. **`/data/eglantineps5/roms/`** *(Respaldo automático)*
-4. **`/data/lichii/roms/oot/`** *(Respaldo automático)*
+El builder pasa **todos los archivos del juego** de tu `.nup` a la carpeta del título: **53 paquetes en `Data/` y su
+manifiesto `Data.idx`**; cada paquete lleva el índice de su grupo (unos 24,4 GiB en cualquier unidad, sin compresión; los archivos dañados de un volcado incompleto
+apuntan a otros completos del mismo tipo). 186.583 archivos sueltos ocuparían 62,5 GiB en una unidad exFAT con clústeres
+de 256 KB; los paquetes ocupan los mismos 24,4 GiB en cualquier unidad y se copian por FTP en minutos, no en horas. En la
+consola el juego lee todo de los paquetes: **la PS5 no necesita ningún `.nup`** y no abre ninguno. *Game data as a
+folder* (`--data-folder`) genera archivos sueltos en su lugar, para mods. Formato:
+[docs/ps5-data-packs.md](docs/ps5-data-packs.md).
 
 ### Diagrama de cómo quedan ordenadas las carpetas en tu PS5
 
 ```text
 /data/
-├── homebrew/
-│   └── PPSA99198/                     <-- Carpeta generada por PS5 Longshot Plus Builder
-│       ├── eboot.bin                  <-- Ejecutable principal recompilado
-│       ├── image.bin                  <-- Código AArch64 traducido del juego
-│       ├── longshot_env.txt           <-- Parámetros de memoria y rendimiento (PS5 Fat / Pro)
-│       ├── longshot_options.ini       <-- Configuración del menú interno (se crea al guardar ajustes)
-│       ├── user/                      <-- ★ TUS PARTIDAS GUARDADAS (¡RESPALDAR SIEMPRE!)
-│       │   └── slot_00/
-│       │       ├── progress.sav
-│       │       └── caption.sav
-│       ├── fsr4/
-│       │   └── lite/                  <-- (Opcional) Pesos INT8 de AMD FSR 4.1.2 Lite
-│       ├── cache/                     <-- Caché de programas de shader (se regenera sola)
-│       ├── radv-shader-cache/         <-- Caché de pipelines Vulkan RADV (se regenera sola)
-│       └── logs/
-│           └── crash_trace.txt        <-- Registro en tiempo real de watchdog y memoria
-│
-└── longshotplus/
-    └── roms/
-        └── oot.nup                    <-- ★ Tu volcado .nup (Title ID 0400486024DEC000, v131072)
+└── homebrew/
+    └── PPSA99198/                     <-- Carpeta generada por PS5 Longshot Plus Builder
+        ├── eboot.bin                  <-- Ejecutable principal recompilado
+        ├── image.bin                  <-- Código AArch64 traducido del juego
+        ├── Data/                      <-- ★ Los archivos del juego: 53 paquetes (Tex.0.pak, Model.pak, ...), ~24,4 GiB
+        ├── Data.idx                   <-- El manifiesto (cada paquete lleva el índice de su grupo): cópialo al final
+        ├── longshot_data.txt          <-- De qué .nup vienen los datos
+        ├── longshot_env.txt           <-- Parámetros de memoria y rendimiento (PS5 Fat / Pro)
+        ├── longshot_options.ini       <-- Configuración del menú interno (se crea al guardar ajustes)
+        ├── user/                      <-- ★ TUS PARTIDAS GUARDADAS (¡RESPALDAR SIEMPRE!)
+        │   └── slot_00/
+        │       ├── progress.sav
+        │       └── caption.sav
+        ├── fsr4/
+        │   └── lite/                  <-- (Opcional) Pesos INT8 de AMD FSR 4.1.2 Lite
+        ├── cache/                     <-- Caché de programas de shader (se regenera sola)
+        ├── radv-shader-cache/         <-- Caché de pipelines Vulkan RADV (se regenera sola)
+        └── logs/
+            └── crash_trace.txt        <-- Registro en tiempo real de watchdog y memoria
 ```
 
 ---
@@ -162,7 +161,7 @@ Descarga el paquete correspondiente a tu arquitectura desde [**Releases (`groovy
    * Pulsa **Build**. Al finalizar obtendrás la carpeta **`PPSA99198`** (**nunca la compartas**, contiene código derivado de tu juego).
 3. **Copia los archivos a la PS5 por FTP (puerto `2121`):**
    * Sube la carpeta completa **`PPSA99198`** a `/data/homebrew/PPSA99198/` (o usa el botón **Send to PS5** del Builder).
-   * Copia tu archivo `.nup` a `/data/longshotplus/roms/oot.nup`.
+   * La carpeta ya incluye los datos del juego en **`Data/`** (53 paquetes, unos 24,4 GiB) y **`Data.idx`**: es la copia larga. No hace falta copiar ningún `.nup` a la consola. Si usas otro programa FTP, copia `Data.idx` al final.
 4. **Inicia el juego:** Abre **LONGSHOT PLUS** desde la pantalla principal de la PS5 o tu lanzador homebrew. La primera visita a cada zona compila sus *shaders* y los guarda en caché; las siguientes visitas serán fluidas.
 
 ---
@@ -212,7 +211,7 @@ Coloca tus mods en `/data/homebrew/PPSA99198/mods/<nombre_del_mod>/romfs/...`.
 ## Solución de Problemas Frecuentes
 
 * **El juego no aparece en la pantalla principal de la PS5:** Verifica que `eboot.bin` esté directamente dentro de `/data/homebrew/PPSA99198/eboot.bin` y que tu entorno homebrew (`etaHEN` / `ShadowMountPlus`) escanee `/data/homebrew/`.
-* **Se queda en pantalla negra antes de los logos:** Comprueba que tu archivo `.nup` esté en `/data/longshotplus/roms/oot.nup` y corresponda exactamente al programa `0400486024DEC000` actualización `v131072`.
+* **Se queda en pantalla negra antes de los logos:** Comprueba que la carpeta `/data/homebrew/PPSA99198/Data/` y `Data.idx` se hayan copiado completos (el log del juego nombra un paquete incompleto) y que tu `.nup` corresponda exactamente al programa `0400486024DEC000` actualización `v131072`.
 * **El Builder se detiene por falta de memoria en PC:** Baja el selector **Memory to use** a `2 GB` o `3 GB` y vuelve a pulsar **Build**; retomará la compilación desde donde se quedó.
 
 ---

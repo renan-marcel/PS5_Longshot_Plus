@@ -52,3 +52,6 @@ dist/
 
 .venv/
 ps5/builder/kit/
+
+# local builder packages (scripts: docker build into Release/)
+Release/

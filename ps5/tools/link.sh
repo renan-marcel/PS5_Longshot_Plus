@@ -92,4 +92,4 @@ done
 cp "$vulkan/runtime/libc.prx" "$app/sce_module/libc.prx"
 # image.bin is made from your game: it stays in dist/ (ignored by git) and goes to the console with the title folder
 cp "$image" "$app/image.bin"
-echo "title: $app ($(du -sh "$app" | cut -f1)); the romfs is read from the game's .nup on the console (host/ps5/nup_romfs.c)"
+echo "title: $app ($(du -sh "$app" | cut -f1)); the game's data goes in its Data/ folder (ps5/builder/game_data.py)"

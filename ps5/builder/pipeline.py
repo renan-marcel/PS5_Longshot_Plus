@@ -72,7 +72,7 @@ MODELS = {
     },
 }
 STEPS = ["Reading the game's program", "Translating it to C", "Compiling for the console", "Linking", "Making the title folder",
-         "Listing the game's shaders"]
+         "Listing the game's shaders", "Extracting the game's data"]
 
 
 class Stop(Exception):
@@ -616,6 +616,25 @@ def shader_lists(kit, work, game, app):
          "--out", app], env=env, what="listing the game's shaders")
 
 
+def game_data(kit, work, game, app, folder=False):
+    """(ps5/builder/game_data.py) the game's whole romfs into the title folder: packs in Data/ and Data.idx (the default), or
+    loose files in Data/ (folder). The console reads every game file from there and never the .nup. From a .nup, or from
+    the romfs/ of a game folder given instead"""
+    step(7)
+    src, env = python_env(kit, work)
+    if os.path.isfile(game):
+        given = ["--nup", game]
+    else:
+        romfs = os.path.join(game, "romfs")
+        if not os.path.isdir(romfs) and os.path.basename(os.path.normpath(game)) == "exefs":
+            romfs = os.path.join(os.path.dirname(os.path.normpath(game)), "romfs")
+        if not os.path.isdir(romfs):
+            raise Stop("the game folder has no romfs/: the console needs the game's data (give the .nup instead)")
+        given = ["--romfs", romfs]
+    run([sys.executable, "-I", "-u", os.path.join(HERE, "game_data.py"), "--src", src, "--app", app] + given +
+        (["--folder"] if folder else []), env=env, what="extracting the game's data")
+
+
 def build(a):
     kit = find_kit(a.kit)
     info = json.load(open(os.path.join(kit, "kit.json")))
@@ -639,6 +658,7 @@ def build(a):
     elf = link(kit, info, work, objects, lld, nm)
     app = title(kit, info, work, elf, native, out, a.model)
     shader_lists(kit, work, a.game, app)
+    game_data(kit, work, a.game, app, a.data_folder)
     say("@@done " + app)
     return app
 
@@ -662,6 +682,8 @@ def main():
     ap.add_argument("--memory", type=float, default=0,
                     help="GB of memory the build may use (default: as much as is free). Lower is slower; %.0f at the least"
                     % MIN_MEMORY_GB)
+    ap.add_argument("--data-folder", action="store_true",
+                    help="the game's data as loose files in Data/ (for mods), not packs with an index (the default)")
     a = ap.parse_args()
     if not a.check and not (a.game and a.out and a.model):
         ap.error("--game, --out and --model are needed (or --check)")

@@ -18,7 +18,8 @@ as a native PS5 title, **PPSA99198**, on my homebrew stack: Mesa's RADV from
 | Lift | The game's ARM64 code to C, from your `.nup`, as upstream does it | `nx2/nup.py --only exefs`, `nx2/lift.py --standalone --write` |
 | Compile | The lifted game, `host/` and `gpu/vk` for `x86_64-sie-ps5` (Zen 2) | `ps5/build.py` |
 | Link | One executable with RADV linked in, signed as the console's fake SELF | `ps5/tools/link.sh` (PS5_VulkanTemplate's link) |
-| Install | `dist/PPSA99198` to `/data/homebrew/PPSA99198`; `romfs/` is read in place from your `.nup` on the console (`HOS_PS5_NUP`, else `/data/lichii/roms/oot/oot.nup`, else `/data/prosperoeden/roms/oot/oot.nup`) | FTP, `host/ps5/nup_romfs.c` |
+| Data | The game's whole romfs from your `.nup` into the title folder's `Data/`, as plain files, damaged dump files replaced | `ps5/builder/game_data.py` (`nx2/nup.py` extract) |
+| Install | `dist/PPSA99198` with its `Data/` to `/data/homebrew/PPSA99198`; the console reads every game file from `Data/` and never the `.nup` | FTP, `host/hos_main.c` |
 
 Players do all of it with the Longshot PS5 Builder, a desktop program for Linux and Windows that carries everything but
 the game (`ps5/builder/README.md`). For development, `ps5/builder/build_kit.sh` fetches PS5_Mesa, PS5_PayloadSDK and
