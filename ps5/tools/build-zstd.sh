@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# PS5: upstream zstd's decompressor (BSD), static, for the console: the .nup keeps some romfs files as zstd frames
-# (host/ps5/nup_romfs.c). Not third_party/zbic's copy: that one carries Atmosphere's GPLv2-only ZBIC code.
+# PS5: upstream zstd's decompressor (BSD), static, for the console: the fonts and the runtime
+# read zstd frames with it. Not third_party/zbic's copy: that one carries Atmosphere's GPLv2-only ZBIC code.
 #
 #   ps5/tools/build-zstd.sh            # into .local/ps5-deps/zstd
 set -euo pipefail

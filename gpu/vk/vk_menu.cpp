@@ -47,6 +47,7 @@
 #include "vk_framegen.h"   // (Frame generation by: who makes the frames now, framegen_maker)
 #include "fg_by.h"         // (PS5: the row's two more values)
 #include "vk_bug_report.h"   // (the Gameplay tab's Bug report: what it writes, and how)
+#include "gpu_skip.h"   // (the Debug tab's GPU freeze shader and Skipped shaders rows)
 #include "../../host/hos_wide_size.h"   // (the widescreen picture's size, as host/hos_main.c works it out)
 #include "../../host/audio_output_devices.h"
 #include "vk_fsr3.h"      // (the Upscaler row: whether AMD FSR 3.1 runs on this GPU)
@@ -1805,6 +1806,13 @@ Row rows[] = {
      "For integrated graphics with 4 CPU threads or fewer (an i3 laptop's UHD Graphics): Render resolution 33% with the game's own "
      "upscaler, the plain window scale without sharpening, the handheld profile, smaller textures, Intel's shaders "
      "one at a time and quick compute builds. The handheld profile applies after a restart."},
+    // (longshot) the shader the GPU last stopped on and those left out: gpu_skip.h, freeze_suspect
+    {TAB_DEBUG, "GPU freeze shader", nullptr, 0, 0, 0, nullptr,
+     "On the PS5: the shader the GPU was running when an earlier run stopped presenting (logs/crash_trace.txt). Skip leaves "
+     "it out from now on, so the game goes on past the place it froze; what that shader draws or computes is then missing "
+     "there. Its values are written to the crash trace for a fix."},
+    {TAB_DEBUG, "Skipped shaders", nullptr, 0, 0, 0, nullptr,
+     "The shaders left out with GPU freeze shader, kept in longshot_options.ini. Enter draws them all again."},
     // (longshot) the Gameplay tab's Bug report (vk_bug_report.h): A or Enter writes the report's folder; the help says what is in it
     {TAB_GAMEPLAY, "Bug report", nullptr, 0, 0, 0, nullptr,
      "Saves what an issue needs in a new folder, bug-reports in the game folder: report.txt with the issue form's answers (this "
@@ -2341,6 +2349,7 @@ void save() {
             // (and the VRAM budget row's, removed: one rule by the card, texture_budget.h and mirror_budget.h)
             mine |= key == "vram_budget";
             mine |= key == "gpu_device_id";   // (the GPU device row's card: written below)
+            mine |= key == "gpu_skip";        // (the Debug tab's skipped shaders: written below)
             for (const Row& r : rows)
                 if (!mine && r.value && key == ini_key(r)) mine = true;
             if (!mine) others += line, others += others.back() == '\n' ? "" : "\n";
@@ -2374,6 +2383,7 @@ void save() {
         const std::string card = opts.gpu_device > 0 ? gpu_choice::card_id(gpu_device_cards, opts.gpu_device - 1)
                                  : opts.gpu_device == 0 && gpu_card_missing ? gpu_saved_card : std::string();
         if (!card.empty()) fprintf(f, "gpu_device_id=%s\n", card.c_str());
+        if (gpu_skip::count.load(std::memory_order_acquire)) fprintf(f, "gpu_skip=%s\n", gpu_skip::to_text().c_str());
         if (auto_for) fprintf(f, "auto_for=%016llx\n", (unsigned long long)auto_for);   // (the hardware Auto (this PC) chose for)
         if (auto_tuned) fprintf(f, "auto_tuned=%016llx\n", (unsigned long long)auto_tuned);   // (and measured in play for)
         // (the tuning's steps so far and whether one went down: the no-seesaw rule and the two steps hold across restarts)
@@ -2509,6 +2519,58 @@ void share_finish() {
     menu_refresh = true;
 }
 bool is_share_row(const Row& r) { return !r.value && r.tab == TAB_DEBUG && !strcmp(r.name, "Save my pipeline list"); }
+bool is_freeze_row(const Row& r) { return !r.value && r.tab == TAB_DEBUG && !strcmp(r.name, "GPU freeze shader"); }
+bool is_skipped_row(const Row& r) { return !r.value && r.tab == TAB_DEBUG && !strcmp(r.name, "Skipped shaders"); }
+#ifdef __PROSPERO__
+extern "C" const char* hos_ps5_trace_path(void);   // (host/ps5/win32_ps5.c: logs/crash_trace.txt)
+#endif
+/// (longshot) The program the GPU last stopped on in an earlier run, read once (the PS5's watchdog: gpu_skip.h last_freeze);
+/// none elsewhere
+const gpu_skip::Freeze& freeze_suspect() {
+    static const gpu_skip::Freeze f = [] {
+        gpu_skip::Freeze out;
+#ifdef __PROSPERO__
+        if (FILE* t = fopen(hos_ps5_trace_path(), "rb")) {
+            std::string text;
+            char buf[4096];
+            for (size_t n; (n = fread(buf, 1, sizeof buf, t)) > 0 && text.size() < (4u << 20);) text.append(buf, n);
+            fclose(t);
+            out = gpu_skip::last_freeze(text);
+        }
+#endif
+        return out;
+    }();
+    return f;
+}
+/// (the GPU freeze shader row's cell: None, Skip, Skipped)
+const char* freeze_cell() {
+    const gpu_skip::Freeze& f = freeze_suspect();
+    return !f.found ? "None" : gpu_skip::contains(f.key) ? "Skipped" : "Skip";
+}
+/// (the Skipped shaders row's cell: None, or how many with what Enter does)
+std::string skipped_cell() {
+    const int n = gpu_skip::count.load(std::memory_order_acquire);
+    return n ? "Restore " + std::to_string(n) : std::string("None");
+}
+/// (the line under the help for those two rows, while one is selected)
+const char* freeze_hint(const Row& r) {
+    static std::string said;
+    const gpu_skip::Freeze& f = freeze_suspect();
+    char key[20];
+    snprintf(key, sizeof key, "%016llx", (unsigned long long)f.key);
+    if (is_freeze_row(r)) {
+        if (!f.found) return "No earlier run stopped on a shader (logs/crash_trace.txt has no GPU freeze).";
+        said = std::string("An earlier run stopped at frame ") + std::to_string(f.present) + " on " +
+               (f.compute ? "compute" : "graphics") + " shader " + key +
+               (gpu_skip::contains(f.key) ? ": left out." : ". Skip leaves it out from now on.");
+        return said.c_str();
+    }
+    if (is_skipped_row(r) && gpu_skip::count.load(std::memory_order_acquire)) {
+        said = "Left out: " + gpu_skip::to_text() + ".";
+        return said.c_str();
+    }
+    return nullptr;
+}
 // (longshot) Set up for a weak laptop (the Debug tab, integrated graphics: row_shown): Minimum's rows and mip trimming, then
 // lighter still. An i3-1115G4's UHD Graphics (2 cores, 4 threads, 16 GB shared) ran Kokiri Forest and the Deku Tree at 3-6 fps
 // with 120-200 ms of GPU time a frame on the game's own dynamic resolution, docked at 2048 x 1152
@@ -3570,6 +3632,8 @@ void draw_debug_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, 
         if (r.cheat == 0 || r.cheat == 1 || r.cheat == 7 || r.value) return halves_w + pad;
         if (is_share_row(r)) return ui::size_of(c.f.strong, px, "Not saved").x + (tight ? 56 : 60) * s;   // (Save, Saved, Not saved)
         if (is_laptop_row(r)) return ui::size_of(c.f.strong, px, "Applied").x + (tight ? 56 : 60) * s;   // (Apply, Applied)
+        if (is_freeze_row(r)) return ui::size_of(c.f.strong, px, "Skipped").x + (tight ? 56 : 60) * s;   // (None, Skip, Skipped)
+        if (is_skipped_row(r)) return ui::size_of(c.f.strong, px, "Restore 32").x + (tight ? 56 : 60) * s;
         const std::string v = r.cheat == 11 ? "1.25x" : cheat_value(r.cheat);   // (Movement speed: its widest, the cell kept still)
         const char* const says = cheat_button_text(r.cheat);
         return ui::size_of(c.f.strong, px, v.empty() ? says : v.c_str()).x + (cheat_chooses(r.cheat) ? 68 : tight ? 56 : 60) * s;   // (choice_cell keeps 48 for arrows either way)
@@ -3645,6 +3709,10 @@ void draw_debug_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, 
             choice_cell(c, va, vb, share_value.empty() ? "Save" : share_value, selected, false, false);
         } else if (is_laptop_row(r)) {
             choice_cell(c, va, vb, laptop_applied ? "Applied" : "Apply", selected, false, false);
+        } else if (is_freeze_row(r)) {
+            choice_cell(c, va, vb, freeze_cell(), selected, false, false);
+        } else if (is_skipped_row(r)) {
+            choice_cell(c, va, vb, skipped_cell(), selected, false, false);
         } else if (r.cheat == 0 || r.cheat == 1 || r.cheat == 7) {
             halves_cell(c, va, vb, "Off", "On", cheat_value(r.cheat) == "On", selected, false);
         } else if (age_shown(r.cheat)) {   // (Link's age now: the other half switches)
@@ -3873,6 +3941,7 @@ void draw_options(ui::Ctx& c) {
     const FieldRow* field = field_row(selr);   // (longshot: a text field: why Enter did not take it, while it is edited)
     const char* hint = selr.value && selr.hint ? selr.hint(*selr.value, -1) : field && editing == field->field ? edit_why : nullptr;
     if (is_share_row(selr) && !share_said.empty()) hint = share_said.c_str();   // (what the last save did)
+    if (is_freeze_row(selr) || is_skipped_row(selr)) hint = freeze_hint(selr);   // (which shader, and whether it is left out)
     if (&selr == &rows[kBugReportRow]) hint = bug_report_hint();   // (the Bug report: where it was saved, or why not)
     const std::string pending_line = (cur_tab == TAB_GRAPHICS || cur_tab == TAB_DEBUG) && restart_pending() ? restart_line(c, 16 * s, hx1 - hx0 - 66 * s) : "";
     static float help_tall = 0, help_tall_w = 0;
@@ -5187,6 +5256,7 @@ void menu_init() {
             if (!strcmp(line, "menu_size") && atoi(eq + 1) == 0) menu_auto = true;
             if (!strcmp(line, "auto_for")) auto_for = strtoull(eq + 1, nullptr, 16);
             if (!strcmp(line, "gpu_device_id")) gpu_saved_card.assign(eq + 1, strcspn(eq + 1, " \t\r\n"));   // (menu_set_gpu_count)
+            if (!strcmp(line, "gpu_skip")) gpu_skip::from_text(eq + 1);   // (the Debug tab's skipped shaders, gpu_skip.h)
             if (!strcmp(line, "auto_tuned")) auto_tuned = strtoull(eq + 1, nullptr, 16);
             if (!strcmp(line, "auto_steps")) {
                 int steps = 0, down = 0;
@@ -6432,6 +6502,13 @@ void menu_tick() {
         else if (press[7] && is_fps_dev_row(r)) cur_tab = TAB_FPS_DEV, tab_selected[TAB_FPS_DEV] = 0, press[7] = false, changed = true;
         else if (press[7] && is_share_row(r)) share_pipeline_list(), press[7] = false, changed = true;
         else if (press[7] && is_laptop_row(r)) weak_laptop_apply(), press[7] = false, changed = true;
+        else if (press[7] && is_freeze_row(r)) {   // (the shader the GPU last stopped on: left out from now on, and saved)
+            if (freeze_suspect().found && gpu_skip::add(freeze_suspect().key)) save();
+            press[7] = false, changed = true;
+        } else if (press[7] && is_skipped_row(r)) {   // (every one drawn again)
+            if (gpu_skip::count.load(std::memory_order_acquire)) gpu_skip::clear(), save();
+            press[7] = false, changed = true;
+        }
         else if (press[7] && &r == &rows[kBugReportRow]) bug_report_save(), press[7] = false, changed = true;
         else if (const FieldRow* f = press[7] ? field_row(r) : nullptr) edit_start(*f->field, f->apply), changed = true;   // (longshot)
         else if (press[7] && !r.value && can_bind()) page = 1, csel = 0, ccol = menu_hit::kCtlPrimary, changed = true;

@@ -848,78 +848,6 @@ __attribute__((constructor)) void hos_ps5_clock_init(void) {
     fprintf(stderr, "[ps5] clock: the time stamp counter at %llu Hz\n", (unsigned long long)hz);
 }
 
-/* The game's package on the console: HOS_PS5_NUP, else the copy an emulator there already keeps, so one 25 GB file serves
-   both: EglantinePS5's folder (under the name its dump has), PS5_Lichii's, then the one that had before 2026-11-10 (when
-   none is there, the first, for the message). */
-static int ps5_is_oot_nup(const char *path) {
-    FILE *f = fopen(path, "rb");
-    if (!f) return 0;
-    char hdr[16384];
-    size_t got = fread(hdr, 1, sizeof hdr - 1, f);
-    fclose(f);
-    if (got < 16) return 0;
-    for (size_t i = 0; i + 16 <= got; i++) {
-        if (strncasecmp(hdr + i, "0400486024dec000", 16) == 0) return 1;
-    }
-    return 0;
-}
-static int ps5_find_any_nup_in_dir(const char *dir, char *out, size_t out_sz) {
-    DIR *d = opendir(dir);
-    if (!d) return 0;
-    struct dirent *de;
-    while ((de = readdir(d)) != NULL) {
-        const char *name = de->d_name;
-        if (name[0] == '.') continue;
-        size_t len = strlen(name);
-        if (len > 4 && strcasecmp(name + len - 4, ".nup") == 0) {
-            int n = snprintf(out, out_sz, "%s/%s", dir, name);
-            if (n > 0 && (size_t)n < out_sz && access(out, R_OK) == 0 && ps5_is_oot_nup(out)) {
-                closedir(d);
-                return 1;
-            }
-        }
-    }
-    closedir(d);
-    return 0;
-}
-const char *hos_ps5_nup(void) {
-    static char discovered[PATH_MAX];
-    static const char *const scan_dirs[] = {
-        "/data/longshotplus/roms",
-        "/data/longshot/roms",
-        "/data/eglantineps5/roms"
-    };
-    static const char *const places[] = {
-        "/data/longshotplus/roms/oot.nup",
-        "/data/longshot/roms/oot.nup",
-        "/data/eglantineps5/roms/The Legend of Zelda Ocarina of Time [0400486024dec000][v131072].nup",
-        "/data/eglantineps5/roms/oot.nup", "/data/lichii/roms/oot/oot.nup", "/data/prosperoeden/roms/oot/oot.nup"};
-    const char *set = getenv("HOS_PS5_NUP");
-    if (set && *set) return set;
-    for (size_t i = 0; i < sizeof scan_dirs / sizeof *scan_dirs; i++)
-        if (ps5_find_any_nup_in_dir(scan_dirs[i], discovered, sizeof discovered)) return discovered;
-    for (size_t i = 0; i < sizeof places / sizeof *places; i++)
-        if (access(places[i], R_OK) == 0) return places[i];
-    return places[0];
-}
-static double file_probe_read_gap;
-static void *file_probe_read(void *unused) {   /* (the game's own reads: 64 KiB pieces of its package, here and there) */
-    (void)unused;
-    const char *nup = hos_ps5_nup();
-    FILE *f = fopen(nup, "rb");
-    if (!f) return NULL;
-    static char piece[65536];
-    uint64_t at = 12345;
-    while (!file_probe_stop) {
-        at = at * 6364136223846793005ull + 1442695040888963407ull;
-        const double t = now_ms();
-        fseeko(f, (off_t)((at >> 20) % (20ull << 30)) & ~(off_t)0xffff, SEEK_SET);
-        if (fread(piece, 1, sizeof piece, f) == 0) clearerr(f);
-        if (now_ms() - t > file_probe_read_gap) file_probe_read_gap = now_ms() - t;
-    }
-    fclose(f);
-    return NULL;
-}
 static void file_probe_at(const char *dir) {
     char path[256], tmp[256];
     snprintf(path, sizeof path, "%s/probe-file.bin", dir);
@@ -929,14 +857,9 @@ static void file_probe_at(const char *dir) {
     if (!data) return;
     memset(data, 0x5a, n);
     file_probe_stop = 0, file_probe_gap[0] = file_probe_gap[1] = 0;
-    pthread_t a, b, c;
-    file_probe_read_gap = 0;
+    pthread_t a, b;
     pthread_create(&a, NULL, file_probe_cpu, NULL);
     pthread_create(&b, NULL, file_probe_open, NULL);
-    pthread_create(&c, NULL, file_probe_read, NULL);
-    { struct timespec warm = {0, 300000000}; nanosleep(&warm, NULL); }
-    const double idle_read = file_probe_read_gap;
-    file_probe_read_gap = 0;
     const double t0 = now_ms();
     FILE *f = fopen(tmp, "wb");
     const double t1 = now_ms();
@@ -951,10 +874,7 @@ static void file_probe_at(const char *dir) {
     file_probe_stop = 1;
     pthread_join(a, NULL);
     pthread_join(b, NULL);
-    pthread_join(c, NULL);
     free(data);
-    fprintf(stderr, "[ps5] timing: a read of 64 KiB from the game's package: %.1f ms at most with nothing written, %.1f ms while "
-            "the 24 MB went to %s\n", idle_read, file_probe_read_gap, dir);
     fprintf(stderr, "[ps5] timing: 24 MB to %s: open %.1f ms, write %.1f, close %.1f, rename %.1f, unlink %.1f; meanwhile a "
             "computing thread paused %.1f ms at most, one opening a file in /app0 %.1f ms\n", dir, t1 - t0, t2 - t1, t3 - t2,
             t4 - t3, t5 - t4, file_probe_gap[0], file_probe_gap[1]);
@@ -1292,6 +1212,8 @@ static uint64_t floor_bytes(void) {
     const char *e = getenv("HOS_PS5_MEM_FLOOR_MB");
     return (e && *e ? strtoull(e, NULL, 10) : 220) << 20;
 }
+static const char *const trace_paths[2] = {"/data/homebrew/PPSA99198/logs/crash_trace.txt",
+                                           "/data/longshot/PPSA99198/logs/crash_trace.txt"};
 static void ps5_write_crash_trace(const char *reason, uint64_t room_mb) {
     char buf[512];
     uint64_t raw_key = __atomic_load_n(&g_last_draw_key, __ATOMIC_RELAXED);
@@ -1308,14 +1230,30 @@ static void ps5_write_crash_trace(const char *reason, uint64_t room_mb) {
         (unsigned long long)gfx_key, (unsigned long long)gfx_s0, (unsigned long long)gfx_s1,
         (unsigned long long)cs_key, is_comp, (unsigned long long)pkey);
     if (n > 0) {
-        int fd = open("/data/homebrew/PPSA99198/logs/crash_trace.txt", O_WRONLY | O_CREAT | O_APPEND | O_SYNC, 0666);
-        if (fd < 0) fd = open("/data/longshot/PPSA99198/logs/crash_trace.txt", O_WRONLY | O_CREAT | O_APPEND | O_SYNC, 0666);
+        int fd = open(trace_paths[0], O_WRONLY | O_CREAT | O_APPEND | O_SYNC, 0666);
+        if (fd < 0) fd = open(trace_paths[1], O_WRONLY | O_CREAT | O_APPEND | O_SYNC, 0666);
         if (fd >= 0) {
             (void)write(fd, buf, (size_t)n);
             close(fd);
         }
         hos_ps5_klog_now("%s", buf);
     }
+}
+/* (longshot) The crash trace's file, for the Debug tab's GPU freeze shader row (gpu/vk/vk_menu.cpp, gpu/vk/gpu_skip.h): the
+   first of the two places that has one, else the first */
+const char *hos_ps5_trace_path(void) {
+    return access(trace_paths[0], F_OK) == 0 || access(trace_paths[1], F_OK) != 0 ? trace_paths[0] : trace_paths[1];
+}
+/* (longshot) A line of the shader probe (gpu/vk/vk_draw.cpp probe_dispatch) into the crash trace, as [PS5-PROBE] <line>:
+   synchronous, so it is there even when the GPU stops right after */
+void hos_ps5_trace_note(const char *line) {
+    int fd = open(trace_paths[0], O_WRONLY | O_CREAT | O_APPEND | O_SYNC, 0666);
+    if (fd < 0) fd = open(trace_paths[1], O_WRONLY | O_CREAT | O_APPEND | O_SYNC, 0666);
+    if (fd < 0) return;
+    (void)write(fd, "[PS5-PROBE] ", 12);
+    (void)write(fd, line, strlen(line));
+    (void)write(fd, "\n", 1);
+    close(fd);
 }
 
 static void ps5_crash_sig_handler(int sig) {
@@ -1353,6 +1291,11 @@ static void *memory_floor_watch(void *unused) {
         } else if (cur_p > 30 && !hang_logged && (now_t - last_progress_ms) >= 2000ULL) {
             hang_logged = 1;
             ps5_write_crash_trace("GPU_FREEZE_2S", room >> 20);
+            /* (and what the last watched dispatch was given, when the probe watches a program: RX_VK_PROBE_PROG, or the
+               program of the last freeze; gpu/vk/vk_draw.cpp probe_dispatch) */
+            static char probe[ZONE_PROBE_LINE + 32];
+            memcpy(probe, "last before the freeze: ", 24);
+            if (zone_probe_take(probe + 24, sizeof probe - 24)) hos_ps5_trace_note(probe);
         }
         zone_boost_update_mem(room >> 20, floor >> 20);
         if (room < floor) {

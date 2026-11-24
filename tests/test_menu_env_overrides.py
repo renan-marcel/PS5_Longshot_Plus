@@ -45,6 +45,7 @@ FIXTURE = r"""
 #include <iterator>
 #include <mutex>   // (save() locks since the control bridge, #926)
 #include <cerrno>   // (save(): what failed, the options file's mode, its move)
+#include "gpu_skip.h"   // (save(): the Debug tab's skipped shaders, gpu_skip=)
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX

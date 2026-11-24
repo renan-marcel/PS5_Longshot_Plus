@@ -69,11 +69,12 @@ static int oot_gamedata_string(Ctx *c, uint32_t hash, char *buf, size_t size) {
 }
 __attribute__((unused)) static int oot_event_playing(Ctx *c) { (void)c; return event_playing; }
 typedef struct { int unused; } SRWLOCK;
-static SRWLOCK map_lock;
+/* (map_lock, map_now, perf_pose_clear: what a newer oot_inventory_refresh keeps the map in and clears; this one may not) */
+__attribute__((unused)) static SRWLOCK map_lock;
 #define AcquireSRWLockExclusive(x) ((void)(x))
 #define ReleaseSRWLockExclusive(x) ((void)(x))
-static char map_now[100];
-static void perf_pose_clear(void) {}
+__attribute__((unused)) static char map_now[100];
+__attribute__((unused)) static void perf_pose_clear(void) {}
 
 #define OOT_CHEAT_ITEM_BASE 100
 #define OOT_CHEAT_AGE_ID 200

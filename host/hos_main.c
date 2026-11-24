@@ -2030,13 +2030,32 @@ static int game_main(int argc, char **argv) {
                 image = beside_image;
                 if (!hos_romfs_dir) hos_romfs_dir = beside_romfs;
 #ifdef __PROSPERO__
-                /* (PS5) the title folder (/app0) holds image.bin and the saves; the romfs is read in place from the game's
-                   .nup (hos_ps5_nup: HOS_PS5_NUP, else the package an emulator there reads), and from a romfs/ folder
-                   beside image.bin only when there is no package */
+                /* (PS5) the title folder (/app0) holds image.bin, the saves and the game's data, which the builder takes
+                   from the .nup (ps5/builder/game_data.py): packs in Data/ with their index Data.idx (host/ps5/pak_romfs.c,
+                   docs/ps5-data-packs.md), or the romfs as plain files in Data/. Every game file is read from there; the
+                   .nup is never opened. A romfs/ folder there is taken when there is neither */
                 if (hos_romfs_dir == beside_romfs) {
-                    int nup_romfs_open(const char *package);
-                    const char *hos_ps5_nup(void);
-                    if (nup_romfs_open(hos_ps5_nup())) hos_romfs_dir = "/nup/romfs";
+                    static char beside_data[MAX_PATH], beside_mark[MAX_PATH], beside_index[MAX_PATH];
+                    snprintf(beside_data, MAX_PATH, "%s" SEP_S "Data", dir);
+                    snprintf(beside_mark, MAX_PATH, "%s" SEP_S "longshot_data.txt", dir);
+                    snprintf(beside_index, MAX_PATH, "%s" SEP_S "Data.idx", dir);
+                    const DWORD data_at = GetFileAttributesA(beside_data), romfs_at = GetFileAttributesA(beside_romfs);
+                    int pak_romfs_open(const char *index_path, const char *packs_dir);
+                    const char *pak_romfs_error(void);
+                    if (GetFileAttributesA(beside_index) != INVALID_FILE_ATTRIBUTES && pak_romfs_open(beside_index, beside_data)) {
+                        hos_romfs_dir = "/pak/romfs";   /* (PAK_ROMFS_ROOT) */
+                    } else if (GetFileAttributesA(beside_index) != INVALID_FILE_ATTRIBUTES) {
+                        fprintf(stderr, "[ps5] game data: the packs cannot be read: %s\n", pak_romfs_error());
+                    } else if (data_at != INVALID_FILE_ATTRIBUTES && (data_at & FILE_ATTRIBUTE_DIRECTORY)) {
+                        hos_romfs_dir = beside_data;
+                        if (GetFileAttributesA(beside_mark) == INVALID_FILE_ATTRIBUTES)
+                            fprintf(stderr, "[ps5] game data: %s has no longshot_data.txt beside it: it may be incomplete (a copy "
+                                    "that did not finish); copy the title folder again if files are missing\n", beside_data);
+                    } else if (romfs_at == INVALID_FILE_ATTRIBUTES || !(romfs_at & FILE_ATTRIBUTE_DIRECTORY)) {
+                        fprintf(stderr, "[ps5] game data: no %s: build the title folder again with the builder, which puts "
+                                "the game's data there, and copy all of it to the console\n", beside_data);
+                    }
+                    fprintf(stderr, "[ps5] game data: %s\n", hos_romfs_dir);
                 }
                 if (!hos_user_dir) hos_user_dir = beside_user;
 #elif !defined(_WIN32)

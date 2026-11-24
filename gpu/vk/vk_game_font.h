@@ -35,7 +35,19 @@
 
 namespace mkwvk::game_font {
 
+#ifdef __PROSPERO__
+// (PS5) the game's data packs (host/ps5/pak_romfs.h): their files are spans of a pack, not files fopen can open
+extern "C" int pak_romfs_path(const char* path);
+extern "C" int64_t pak_romfs_read(const char* path, void* buf, uint64_t cap);
+#endif
 inline bool read_file(const std::string& path, std::vector<unsigned char>& out) {
+#ifdef __PROSPERO__
+    if (pak_romfs_path(path.c_str())) {
+        const int64_t n = pak_romfs_read(path.c_str(), nullptr, 0);
+        out.resize(n > 0 ? (size_t)n : 0);
+        return n > 0 && pak_romfs_read(path.c_str(), out.data(), out.size()) == n;
+    }
+#endif
     FILE* f = fopen(path.c_str(), "rb");
     if (!f) return false;
     fseek(f, 0, SEEK_END);

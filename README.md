@@ -27,36 +27,39 @@ Save data, slots, thumbnails, and settings reside in **`user/`**. Always back up
 
 ---
 
-## Automatic `.nup` ROM Discovery & PS5 Folder Structure
+## Game Data Folder (`Data/`) & PS5 Folder Structure
 
-Automatic ROM scanning verifies the official *Ocarina of Time* Title ID (`0400486024DEC000`) across priority paths:
-1. `/data/longshotplus/roms/` (Primary)
-2. `/data/longshot/roms/` (Fallback)
-3. `/data/eglantineps5/roms/` (Fallback)
-4. `/data/lichii/roms/oot/` (Fallback)
+The builder takes **every game file** from your `.nup` into the title folder: **53 packs in `Data/` and their index
+`Data.idx`**, a small manifest; each pack holds its group's index (about 24.4 GiB on any drive, nothing compressed; damaged files of an incomplete dump point at whole ones of
+the same kind). 186,583 loose files would take 62.5 GiB on an exFAT drive with 256 KB clusters; the packs take the same
+24.4 GiB everywhere and copy over FTP in minutes, not hours. On the console the game reads everything from the packs:
+**no `.nup` is needed on the PS5**, and none is opened. *Game data as a folder* (`--data-folder`) gives loose files
+instead, for mods. Format: [docs/ps5-data-packs.md](docs/ps5-data-packs.md).
 
 ### PS5 Directory Layout Diagram
 
 ```text
 /data/
-├── homebrew/
-│   └── PPSA99198/                     <-- Output folder built by PS5 Longshot Plus Builder
-│       ├── eboot.bin                  <-- Recompiled main PS5 executable
-│       ├── image.bin                  <-- Translated AArch64 game code
-│       ├── longshot_env.txt           <-- Memory & performance switches (PS5 Fat / Pro profile)
-│       ├── longshot_options.ini       <-- In-game menu settings (created on first save)
-│       ├── user/                      <-- ★ YOUR GAME SAVES (ALWAYS BACK UP!)
-│       ├── fsr4/lite/                 <-- Optional AMD FSR 4.1.2 Lite INT8 shader weights
-│       ├── cache/ & radv-shader-cache/ <-- Auto-regenerated shader caches
-│       └── logs/crash_trace.txt       <-- Real-time O_SYNC watchdog & memory telemetry log
-└── longshotplus/roms/oot.nup          <-- ★ Your .nup dump (Title ID 0400486024DEC000)
+└── homebrew/
+    └── PPSA99198/                     <-- Output folder built by PS5 Longshot Plus Builder
+        ├── eboot.bin                  <-- Recompiled main PS5 executable
+        ├── image.bin                  <-- Translated AArch64 game code
+        ├── Data/                      <-- ★ The game's files: 53 packs (Tex.0.pak, Model.pak, ...), ~24.4 GiB
+        ├── Data.idx                   <-- The manifest (each pack holds its group's index): written last, copy it last
+        ├── longshot_data.txt          <-- Which .nup the data came from
+        ├── longshot_env.txt           <-- Memory & performance switches (PS5 Fat / Pro profile)
+        ├── longshot_options.ini       <-- In-game menu settings (created on first save)
+        ├── user/                      <-- ★ YOUR GAME SAVES (ALWAYS BACK UP!)
+        ├── fsr4/lite/                 <-- Optional AMD FSR 4.1.2 Lite INT8 shader weights
+        ├── cache/ & radv-shader-cache/ <-- Auto-regenerated shader caches
+        └── logs/crash_trace.txt       <-- Real-time O_SYNC watchdog & memory telemetry log
 ```
 
 ---
 
 ## Known Gameplay Advisories
 
-* **⚠️ Monster Coliseum:** Currently **not recommended** due to a compute shader (`prog_key=53fcaee4dc45c6ee`) causing GPU hangs after ~30 seconds on RDNA 2.
+* **⚠️ Monster Coliseum:** Currently **not recommended** due to a compute shader (`prog_key=53fcaee4dc45c6ee`) causing GPU hangs after ~30 seconds on RDNA 2. The same shader also froze a cutscene. **Debug tab → GPU freeze shader**: after a run that froze, it names the shader the GPU stopped on (`logs/crash_trace.txt`); **Skip** leaves it out from then on, so you can go on past that place (what it draws there is missing), and **Skipped shaders** puts them back. The next freeze on it also writes its inputs to `crash_trace.txt` (`[PS5-PROBE]` lines) for a fix.
 * **Verified Areas:** Kokiri Forest, Hyrule Field, Lon Lon Ranch, Kakariko, Zora's Domain, Gerudo Valley, and Forest Temple.
 * **Memory Safety:** If free memory drops below `220 MiB`, a clean `MEMORY_FLOOR_EXIT` triggers to protect saves; simply relaunch from the home screen.
 
@@ -170,9 +173,9 @@ share it.**
 1. Copy the whole **`PPSA99198`** folder to **`/data/homebrew/`** on the console, so that it is
    `/data/homebrew/PPSA99198`. Either type the console's address in the builder and press **Send to PS5**, or copy it
    with any FTP program.
-2. Copy your game file to the console as **`/data/longshotplus/roms/oot.nup`** (make the folders if they are not
-   there). It is 25 GB: this is the long copy. Existing files under `/data/longshot/roms/oot.nup`,
-   `/data/eglantineps5/roms/oot.nup`, or `/data/lichii/roms/oot/oot.nup` are also detected automatically.
+2. The folder holds the game's data in **`Data/`** (53 packs, about 24.4 GiB) and **`Data.idx`**: this is the long
+   copy. No `.nup` goes to the console. If you copy with another FTP program, copy `Data.idx` last; a pack copied only
+   in part is named in the game's log (`[ps5] game data: ...`).
 3. Start **Longshot** from the console's home screen, or from your homebrew launcher.
 
 The first visit to each place stutters while its shaders are made; they are kept, and later visits are smooth.

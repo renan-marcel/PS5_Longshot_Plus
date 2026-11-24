@@ -1,4 +1,5 @@
-"""Check 32- and 64-lane shader profiles and AMD's fragment shuffle path without a GPU."""
+"""Check 32- and 64-lane shader profiles, AMD's fragment shuffle path and RADV's mesh NumWorkgroups workaround (#2338)
+without a GPU."""
 
 import argparse
 import os
@@ -30,6 +31,9 @@ enum VkShaderStageFlagBits : uint32_t {
 };
 using VkShaderStageFlags = uint32_t;
 constexpr uint32_t VK_DRIVER_ID_AMD_PROPRIETARY = 1;
+constexpr uint32_t VK_DRIVER_ID_MESA_RADV = 3;   // (vulkan_core.h's values)
+#define VK_MAKE_VERSION(major, minor, patch) \
+    ((((uint32_t)(major)) << 22U) | (((uint32_t)(minor)) << 12U) | ((uint32_t)(patch)))
 struct {
     uint32_t sg32_stages = 0, subgroup_size = 32, subgroup_max = 32, driver_id = 0;
     struct {
@@ -39,7 +43,8 @@ struct {
              shaderStorageTexelBufferArrayNonUniformIndexing = true;
     } vk12;
     bool float_atomic_add = false;
-    struct { struct { uint64_t minStorageBufferOffsetAlignment = 16; } limits; } props;
+    // (make_profile: RADV's version for the mesh NumWorkgroups workaround, #2338)
+    struct { struct { uint64_t minStorageBufferOffsetAlignment = 16; } limits; uint32_t driverVersion = 0; } props;
     struct { bool gather_offset = false; } fixes;   // (vk_vendor.h: make_profile reads the gather offset from it)
 } dev;
 
@@ -71,6 +76,8 @@ int main(int argc, char** argv) {
     dev.subgroup_max = number(2);
     dev.sg32_stages = number(3);
     dev.driver_id = number(4);
+    // (#2338: the driver's version, VK_MAKE_VERSION as Mesa encodes it; unset: 0, unknown)
+    if (const char* v = getenv("FIXTURE_DRIVER_VERSION")) dev.props.driverVersion = uint32_t(std::strtoul(v, nullptr, 0));
     // (storage buffers bound and translated at 16 bytes at least: AMD's 4 made the 8- and 16-byte vector views inexact)
     for (const uint64_t device : {uint64_t{4}, uint64_t{16}, uint64_t{64}}) {
         dev.props.limits.minStorageBufferOffsetAlignment = device;
@@ -79,6 +86,9 @@ int main(int argc, char** argv) {
     dev.props.limits.minStorageBufferOffsetAlignment = 4;
     check(profile(), number(5));
     assert(profile().min_ssbo_alignment == 16);
+    // (#2338: native mesh shaders keep NumWorkgroups live on RADV before 26.2.5, and where its version is unknown)
+    const char* mesh = getenv("FIXTURE_MESH_NUM_WORKGROUPS");
+    assert(profile().need_mesh_num_workgroups == (mesh && mesh[0] == '1'));
     check(profile_graphics(VK_SHADER_STAGE_VERTEX_BIT), number(6));
     check(profile_graphics(VK_SHADER_STAGE_FRAGMENT_BIT), number(7));
     check(profile_pinned(), number(8));
@@ -153,7 +163,17 @@ void check_stamp(uint32_t size, uint32_t pinned, bool workaround, bool forced) {
             ((64, 64, 32, 1), (64, 64, 64, 32, 64, 64, 0), {"RX_VK_FRAG_SHUFFLE_FALLBACK": "0"}),
             ((64, 64, 32, 0), (64, 64, 64, 32, 64, 64, 1), {"RX_VK_FRAG_SHUFFLE_FALLBACK": "1"}),
         ]
-        env = {k: v for k, v in os.environ.items() if k not in ("RX_VK_WARP64", "RX_VK_FRAG_SHUFFLE_FALLBACK")}
+        # RADV (driver 3) with Mesa's version encoded as VK_MAKE_VERSION: the mesh NumWorkgroups workaround before 26.2.5 and
+        # where the version is unknown (0), not from 26.2.5 nor on another driver (#2338)
+        radv = lambda major, minor, patch: str(major << 22 | minor << 12 | patch)   # noqa: E731
+        cases += [
+            ((32, 32, 0, 3), (32, 32, 32, 32, 32, 32, 0), {"FIXTURE_DRIVER_VERSION": radv(26, 2, 4), "FIXTURE_MESH_NUM_WORKGROUPS": "1"}),
+            ((32, 32, 0, 3), (32, 32, 32, 32, 32, 32, 0), {"FIXTURE_DRIVER_VERSION": radv(26, 2, 5)}),
+            ((32, 32, 0, 3), (32, 32, 32, 32, 32, 32, 0), {"FIXTURE_MESH_NUM_WORKGROUPS": "1"}),
+            ((64, 64, 32, 1), (64, 64, 64, 32, 64, 64, 1), {"FIXTURE_DRIVER_VERSION": radv(25, 0, 0)}),
+        ]
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("RX_VK_WARP64", "RX_VK_FRAG_SHUFFLE_FALLBACK", "FIXTURE_DRIVER_VERSION", "FIXTURE_MESH_NUM_WORKGROUPS")}
         for device, expected, overrides in cases:
             subprocess.run([str(exe), *map(str, device + expected)], env=env | overrides, check=True, timeout=10)
     assert "EmitSPIRV(profile_pinned(), rt, t->program, bindings)" in shader

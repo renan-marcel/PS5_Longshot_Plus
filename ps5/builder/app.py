@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, QF
 HERE = os.path.dirname(os.path.abspath(__file__))
 PIPELINE = os.environ.get("LONGSHOT_PS5_PIPELINE", os.path.join(HERE, "pipeline.py"))
 STEPS = ["Reading the game's program", "Translating it to C", "Compiling for the console", "Linking", "Making the title folder",
-         "Listing the game's shaders"]
+         "Listing the game's shaders", "Extracting the game's data"]
 ABOUT = {
     1: "A few seconds.",
     2: "5 to 15 minutes. About 2 GB of memory, more to go faster where it is free.",
@@ -21,6 +21,8 @@ ABOUT = {
     4: "Under a minute.",
     5: "A few seconds.",
     6: "A few seconds.",
+    7: "10 to 40 minutes: every game file (about 26 GB) into the title folder: 53 packs in Data/ and Data.idx (loose files "
+       "with Game data as a folder). Wants that much free on its drive.",
 }
 
 STYLE = """
@@ -121,7 +123,10 @@ class Sender(QThread):
                 for n in names:
                     p = os.path.join(base, n)
                     files.append((p, os.path.relpath(p, self.folder).replace(os.sep, "/")))
-            files.sort(key=lambda f: (f in ("eboot.bin", "sce_sys/param.json"), f))
+            # (the executable last, and last of all the mark that Data/ is whole: a send stopped part way leaves no folder
+            # that looks complete)
+            files.sort(key=lambda f: (f[1] in ("Data.idx", "longshot_data.txt"), f[1] == "longshot_data.txt",
+                                      f[1] in ("eboot.bin", "sce_sys/param.json"), f[1]))
             total = sum(os.path.getsize(p) for p, _ in files)
             sent = 0
             ftp = None
@@ -153,18 +158,23 @@ class Sender(QThread):
             ftp.voidcmd("TYPE I")
             root = "/data/homebrew/" + title
 
-            def mkdirs(path):
+            made = set()
+
+            def mkdirs(path):   # (each folder asked for once: Data/ holds about 186,000 files)
                 at = ""
                 for part in path.strip("/").split("/"):
                     at += "/" + part
+                    if at in made:
+                        continue
                     try:
                         ftp.mkd(at)
                     except ftplib.all_errors:
                         pass
+                    made.add(at)
             mkdirs(root)
             for path, rel in files:
                 if "/" in rel:
-                    mkdirs(root + "/" + rel.rsplit("/", 1))
+                    mkdirs(root + "/" + rel.rsplit("/", 1)[0])
                 self.said.emit("sending " + rel)
                 with open(path, "rb") as f:
                     def block(b):
@@ -298,6 +308,10 @@ class Window(QWidget):
         mem_cores.addWidget(self.memory, 1)
         mem_cores.addWidget(self.jobs)
         grid.addLayout(mem_cores, 2, 3, 1, 2)
+        # (the game's data as packs with an index by default: ps5/builder/data_packs.py; as loose files for mods)
+        self.data_folder = QCheckBox("Game data as a folder (loose files, for mods): takes 2-3x the room on exFAT drives")
+        self.data_folder.setChecked(str(self.settings.value("data_folder", "false")).lower() == "true")
+        grid.addWidget(self.data_folder, 3, 1, 1, 4)
         grid.setColumnStretch(1, 2)
         grid.setColumnStretch(3, 2)
 
@@ -354,7 +368,7 @@ class Window(QWidget):
         ftp_box = QVBoxLayout(ftp_card)
         ftp_box.setContentsMargins(16, 12, 16, 12)
         ftp_box.setSpacing(8)
-        self.send_note = QLabel("After building: copy <b>PPSA99198</b> to <b>/data/homebrew/</b> on your PS5 (or send over FTP below) and place your .nup at <b>/data/longshotplus/roms/oot.nup</b>.")
+        self.send_note = QLabel("After building: copy <b>PPSA99198</b> to <b>/data/homebrew/</b> on your PS5 (or send over FTP below). The game's data is in <b>Data</b> and <b>Data.idx</b> (about 26 GB): the console needs no .nup.")
         self.send_note.setObjectName("SubTitle")
         self.send_note.setWordWrap(True)
         self.send_note.setTextFormat(Qt.TextFormat.RichText)
@@ -417,7 +431,7 @@ class Window(QWidget):
             self.out.setText(path)
 
     def busy(self, on):
-        for w in (self.game, self.game_pick, self.out, self.out_pick, self.jobs, self.memory, self.model):
+        for w in (self.game, self.game_pick, self.out, self.out_pick, self.jobs, self.memory, self.model, self.data_folder):
             w.setEnabled(not on)
         self.go.setText("Stop Build" if on else "Build Title")
         self.go.setObjectName("StopBtn" if on else "PrimaryBtn")
@@ -442,7 +456,8 @@ class Window(QWidget):
         if not model:
             QMessageBox.warning(self, "No console", "Choose your console: PS5 / PS5 Slim, or PS5 Pro.")
             return
-        for k, v in (("game", game), ("out", out), ("jobs", self.jobs.value()), ("memory", self.memory.currentData()), ("model", model)):
+        for k, v in (("game", game), ("out", out), ("jobs", self.jobs.value()), ("memory", self.memory.currentData()), ("model", model),
+                     ("data_folder", self.data_folder.isChecked())):
             self.settings.setValue(k, v)
         os.makedirs(out, exist_ok=True)
         self.log.clear()
@@ -460,6 +475,8 @@ class Window(QWidget):
             args += ["--jobs", str(self.jobs.value())]
         if self.memory.currentData():
             args += ["--memory", str(self.memory.currentData())]
+        if self.data_folder.isChecked():
+            args += ["--data-folder"]
         self.error = ""
         self.proc = Build(args)
         self.proc.line.connect(self.line)
