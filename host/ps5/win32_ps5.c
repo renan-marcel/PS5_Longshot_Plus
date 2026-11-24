@@ -1256,10 +1256,49 @@ void hos_ps5_trace_note(const char *line) {
     close(fd);
 }
 
+/* (longshot) The report a break leaves in bug-reports/ (host/ps5/ps5_bug_report.c), with what the title knows now: once per
+   run for each kind ("crash", "freeze"), in the title folder the crash trace is in */
+#include "ps5_bug_report.h"
+void hos_ps5_bug_report(const char *kind, const char *reason, const char *detail) {
+    static int crash_done, freeze_done;
+    int *done = kind && !strcmp(kind, "freeze") ? &freeze_done : &crash_done;
+    if (__atomic_exchange_n(done, 1, __ATOMIC_ACQ_REL)) return;
+    static char title[256], facts[2048], made[1024];
+    const char *trace = hos_ps5_trace_path();
+    const char *cut = strstr(trace, "/logs/crash_trace.txt");
+    snprintf(title, sizeof title, "%.*s", cut ? (int)(cut - trace) : (int)strlen(trace), trace);
+    const char *hos_version(void);
+    const char *asset_prefetch_scene_now(void);
+    const char *scene = asset_prefetch_scene_now();
+    const uint64_t raw = __atomic_load_n(&g_last_draw_key, __ATOMIC_RELAXED);
+    snprintf(facts, sizeof facts,
+             "Version: %s
+Scene: %s
+Free memory: %llu MiB (the last the watchdog saw)
+Frames shown: %lld
+"
+             "Last graphics program: %016llx (stages %016llx, %016llx)
+Last compute program: %016llx
+"
+             "Last program drawn: %016llx (%s)
+", hos_version(), scene && scene[0] ? scene : "not known yet",
+             (unsigned long long)__atomic_load_n(&g_ps5_free_mem_mb, __ATOMIC_RELAXED),
+             (long long)__atomic_load_n(&g_last_present_seen, __ATOMIC_RELAXED),
+             (unsigned long long)__atomic_load_n(&g_last_gfx_key, __ATOMIC_RELAXED),
+             (unsigned long long)__atomic_load_n(&g_last_gfx_stage0, __ATOMIC_RELAXED),
+             (unsigned long long)__atomic_load_n(&g_last_gfx_stage1, __ATOMIC_RELAXED),
+             (unsigned long long)__atomic_load_n(&g_last_cs_key, __ATOMIC_RELAXED),
+             (unsigned long long)(raw & ~(1ull << 63)), (raw >> 63) ? "compute" : "graphics");
+    if (hos_ps5_bug_report_write(title, kind ? kind : "crash", reason, detail, facts, made, sizeof made))
+        hos_ps5_klog_now("[ps5] the break's report: %s", made);
+}
+
 static void ps5_crash_sig_handler(int sig) {
     char msg[64];
     snprintf(msg, sizeof msg, "SIGNAL_%d", sig);
     ps5_write_crash_trace(msg, __atomic_load_n(&g_ps5_free_mem_mb, __ATOMIC_RELAXED));
+    hos_ps5_bug_report("crash", msg, sig == SIGSEGV || sig == SIGBUS ? "a memory fault" : sig == SIGILL ?
+                       "an illegal instruction" : sig == SIGABRT ? "an abort" : NULL);
     _exit(128 + sig);
 }
 
@@ -1291,6 +1330,7 @@ static void *memory_floor_watch(void *unused) {
         } else if (cur_p > 30 && !hang_logged && (now_t - last_progress_ms) >= 2000ULL) {
             hang_logged = 1;
             ps5_write_crash_trace("GPU_FREEZE_2S", room >> 20);
+            hos_ps5_bug_report("freeze", "GPU_FREEZE_2S", "no frame for 2 s (the GPU stopped, or the game waits on it)");
             /* (and what the last watched dispatch was given, when the probe watches a program: RX_VK_PROBE_PROG, or the
                program of the last freeze; gpu/vk/vk_draw.cpp probe_dispatch) */
             static char probe[ZONE_PROBE_LINE + 32];
@@ -1300,6 +1340,7 @@ static void *memory_floor_watch(void *unused) {
         zone_boost_update_mem(room >> 20, floor >> 20);
         if (room < floor) {
             ps5_write_crash_trace("MEMORY_FLOOR_EXIT", room >> 20);
+            hos_ps5_bug_report("crash", "MEMORY_FLOOR_EXIT", "the title closed itself: the console was running out of memory");
             int64_t at = 0;
             size_t largest = 0;
             sceKernelAvailableDirectMemorySize(0, sceKernelGetDirectMemorySize(), 0x10000, &at, &largest);

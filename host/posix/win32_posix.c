@@ -1608,6 +1608,13 @@ static void on_signal(int sig, siginfo_t *si, void *uctx) {
         hos_ps5_klog_now("[ps5] unhandled signal %d at eboot+%#lx, address %#lx (%s, mc_err %#lx)", sig,
                          (unsigned long)((uintptr_t)uc->uc_mcontext.mc_rip - hos_ps5_exe_base()), (unsigned long)si->si_addr,
                          HOS_FAULT_WRITE(uc) ? "write" : "read", (unsigned long)uc->uc_mcontext.mc_err);
+        /* (the break's report in bug-reports/: host/ps5/ps5_bug_report.c; once, whichever handler gets there first) */
+        void hos_ps5_bug_report(const char *kind, const char *reason, const char *detail);
+        static char why[160];
+        snprintf(why, sizeof why, "signal %d at eboot+%#lx, address %#lx (%s)", sig,
+                 (unsigned long)((uintptr_t)uc->uc_mcontext.mc_rip - hos_ps5_exe_base()), (unsigned long)si->si_addr,
+                 HOS_FAULT_WRITE(uc) ? "write" : "read");
+        hos_ps5_bug_report("crash", "UNHANDLED_SIGNAL", why);
     }
 #endif
     /* not ours: whoever had the signal before, else the default (the fault comes again and ends the process) */

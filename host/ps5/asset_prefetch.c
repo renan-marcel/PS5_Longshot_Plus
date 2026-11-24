@@ -620,6 +620,9 @@ void asset_prefetch_disk(int fd, uint64_t base, uint32_t bytes, double ms) {
     pthread_mutex_unlock(&mu);
 }
 
+/* The game's current scene as last told (a break's report: host/ps5/ps5_bug_report.c); "" before the first */
+const char *asset_prefetch_scene_now(void) { return scene_now; }
+
 void asset_prefetch_stats(AssetPrefetchStats *out) {
     pthread_mutex_lock(&mu);
     *out = st;
