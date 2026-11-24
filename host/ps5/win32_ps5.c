@@ -1272,16 +1272,9 @@ void hos_ps5_bug_report(const char *kind, const char *reason, const char *detail
     const char *scene = asset_prefetch_scene_now();
     const uint64_t raw = __atomic_load_n(&g_last_draw_key, __ATOMIC_RELAXED);
     snprintf(facts, sizeof facts,
-             "Version: %s
-Scene: %s
-Free memory: %llu MiB (the last the watchdog saw)
-Frames shown: %lld
-"
-             "Last graphics program: %016llx (stages %016llx, %016llx)
-Last compute program: %016llx
-"
-             "Last program drawn: %016llx (%s)
-", hos_version(), scene && scene[0] ? scene : "not known yet",
+             "Version: %s\nScene: %s\nFree memory: %llu MiB (the last the watchdog saw)\nFrames shown: %lld\n"
+             "Last graphics program: %016llx (stages %016llx, %016llx)\nLast compute program: %016llx\n"
+             "Last program drawn: %016llx (%s)\n", hos_version(), scene && scene[0] ? scene : "not known yet",
              (unsigned long long)__atomic_load_n(&g_ps5_free_mem_mb, __ATOMIC_RELAXED),
              (long long)__atomic_load_n(&g_last_present_seen, __ATOMIC_RELAXED),
              (unsigned long long)__atomic_load_n(&g_last_gfx_key, __ATOMIC_RELAXED),
