@@ -62,6 +62,7 @@ static int ready;
 static char why[2048];   /* (a pack's whole path and a sentence) */
 
 const char *pak_romfs_error(void) { return why; }
+const uint8_t *pak_romfs_build_id(void) { return ready && manifest ? manifest + 0x10 : NULL; }
 
 static uint64_t fnv(const char *s, size_t n) {
     uint64_t h = 1469598103934665603ull;

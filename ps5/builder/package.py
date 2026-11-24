@@ -261,7 +261,7 @@ def stage(system, a):
 
     # ---- the window, the build, the kit, the system's own programs ----
     os.makedirs(os.path.join(top, "app"))
-    for f in ("app.py", "pipeline.py", "shader_lists.py", "game_data.py", "data_packs.py", "known_gpu_hangs.txt"):
+    for f in ("app.py", "pipeline.py", "shader_lists.py", "game_data.py", "data_packs.py", "asset_deps.py", "known_gpu_hangs.txt"):
         shutil.copy2(os.path.join(HERE, f), os.path.join(top, "app", f))
     shutil.copy2(os.path.join(ROOT, "ps5", "sce_sys", "icon0.png"), os.path.join(top, "app", "longshot.png"))
     shutil.copytree(a.kit, os.path.join(top, "kit"))

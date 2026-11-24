@@ -1054,6 +1054,7 @@ DWORD GetCurrentDirectoryA(DWORD cap, LPSTR out) {
 #ifdef __PROSPERO__   /* (a file of the game's data packs: fd the pack's, shared and never closed here; base where the
                          file starts in it, size its size, pos where read() goes on: host/ps5/pak_romfs.h) */
 #include "../ps5/pak_romfs.h"
+#include "../ps5/asset_prefetch.h"
 typedef struct { HObj h; int fd; int pak; uint64_t base, size, pos; } HFile;
 static HFile std_files[3] = {{{H_FILE}, 0, 0, 0, 0, 0}, {{H_FILE}, 1, 0, 0, 0, 0}, {{H_FILE}, 2, 0, 0, 0, 0}};
 #define PAK_FILE(f) ((f)->pak)
@@ -1131,6 +1132,7 @@ HANDLE IO_INNER(CreateFileA)(LPCSTR name, DWORD access, DWORD share, void *attr,
         }
         HFile *f = (HFile *)calloc(1, sizeof *f);
         f->h.type = H_FILE, f->fd = fd, f->pak = 1, f->base = base, f->size = size;
+        asset_prefetch_open(path, fd, base, size);   /* (measured, learned; a scene's parameters start its read-ahead) */
         return f;
     }
 #endif
@@ -1172,13 +1174,21 @@ IO_STATIC BOOL IO_INNER(ReadFile)(HANDLE h, void *buf, DWORD n, DWORD *got, OVER
         HFile *f = (HFile *)h;
         const uint64_t from = ov ? (uint64_t)at : f->pos;
         const DWORD want = from >= f->size ? 0 : f->size - from < n ? (DWORD)(f->size - from) : n;
+        /* (the bucket of files read ahead first: host/ps5/asset_prefetch.c; else the pack, timed) */
+        if (want && asset_prefetch_read(fd, f->base, f->size, from, buf, want)) {
+            if (!ov) f->pos = from + want;
+            if (got) *got = want;
+            return TRUE;
+        }
+        const double read_t0 = want ? io_ms() : 0;
         while (done < want) {
             const ssize_t r = pread(fd, (char *)buf + done, want - done, (off_t)(f->base + from + done));
             if (r < 0 && errno == EINTR) continue;
-            if (r < 0) { if (got) *got = done; return fail_errno(); }
+            if (r < 0) { if (got) *got = done; if (want) asset_prefetch_disk(fd, f->base, done, io_ms() - read_t0); return fail_errno(); }
             if (!r) break;
             done += (DWORD)r;
         }
+        if (want) asset_prefetch_disk(fd, f->base, done, io_ms() - read_t0);
         if (!ov) f->pos = from + done;
         if (got) *got = done;
         if (ov && !done && n) { last_error = ERROR_HANDLE_EOF; return FALSE; }
