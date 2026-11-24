@@ -41,6 +41,7 @@
 #include "vk_dump.h"
 #include "vk_jobs.h"
 #include "texture_budget.h"
+#include "ps5_tex_tier.h"   // (PS5: the texture size the free memory allows now)
 #include "zone_boost.h"
 
 #include <span>
@@ -85,6 +86,33 @@ uint64_t ps5_tex_reserve() {   // (vk_vma.cpp asks too)
     return v;
 }
 static std::atomic<uint64_t> ps5_pressed_n{0}, ps5_restored_n{0};
+// (longshot) The size by free memory (ps5_tex_tier.h): RX_VK_TEX_ROOMY_DIM, 0 (off) unless the profile sets it
+uint32_t ps5_tex_roomy_dim() {
+    static const uint32_t v = getenv("RX_VK_TEX_ROOMY_DIM") ? (uint32_t)atoi(getenv("RX_VK_TEX_ROOMY_DIM")) : 0;
+    return v;
+}
+static std::atomic<bool> ps5_roomy_state{false};
+static std::atomic<uint64_t> ps5_tier_up_n{0}, ps5_tier_down_n{0};
+/// Whether the title's free memory is roomy now (with the line's hysteresis), said in the log each time it changes
+bool ps5_roomy_now() {
+    if (!ps5_tex_roomy_dim()) return false;
+    static const tex_tier::Line line = [] {
+        tex_tier::Line l;
+        l.reserve = ps5_tex_reserve();
+        if (const char* m = getenv("RX_VK_TEX_ROOMY_MB")) l.margin = (uint64_t)atoi(m) << 20;
+        if (const char* h = getenv("RX_VK_TEX_ROOMY_HYST_MB")) l.hysteresis = (uint64_t)atoi(h) << 20;
+        return l;
+    }();
+    const uint64_t room = hos_ps5_direct_room();
+    bool was = ps5_roomy_state.load(std::memory_order_relaxed);
+    const bool now = tex_tier::roomy(was, room, line);
+    if (now != was && ps5_roomy_state.compare_exchange_strong(was, now))
+        logf("vk: %llu MB free (%llu kept for the game): textures %s now (%llu made again larger so far, %llu smaller)",
+             (unsigned long long)(room >> 20), (unsigned long long)(line.reserve >> 20),
+             now ? "up to RX_VK_TEX_ROOMY_DIM" : "back to RX_VK_TEX_MAX_DIM", (unsigned long long)ps5_tier_up_n.load(),
+             (unsigned long long)ps5_tier_down_n.load());
+    return now;
+}
 #endif
 namespace {
 
@@ -2110,7 +2138,14 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
         // 8192 x 8192 x 68 ASTC: 24 GB as RGBA8)
         const bool small_mips = low_vram_texture_mips();
         static const char* dim_env = getenv("RX_VK_TEX_MAX_DIM");
-        const uint32_t max_dim = dim_env ? (uint32_t)atoi(dim_env) : small_mips ? 1024 : 2048;
+        const uint32_t max_dim_low = dim_env ? (uint32_t)atoi(dim_env) : small_mips ? 1024 : 2048;
+#ifdef __PROSPERO__
+        // (longshot) PS5: wider while the title's free memory is roomy (RX_VK_TEX_ROOMY_DIM; ps5_tex_tier.h)
+        const bool roomy_now = astc && ps5_roomy_now();
+        const uint32_t max_dim = astc ? tex_tier::dim_now(max_dim_low, ps5_tex_roomy_dim(), roomy_now) : max_dim_low;
+#else
+        const uint32_t max_dim = max_dim_low;
+#endif
         static const uint64_t max_bytes = (uint64_t)(getenv("RX_VK_TEX_MAX_MB") ? atoi(getenv("RX_VK_TEX_MAX_MB")) : 1536) << 20;
         const bool blocks = !astc && (is_bc(x.format) || is_astc(x.format));
         const uint32_t texel = astc ? 4 : blocks ? bpb : std::max(1, bpb / std::max(1, bw * bh));
@@ -2142,6 +2177,9 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
                (std::max(x.width, x.height) >> x.skip) > max_dim)
             x.skip++;
 #ifdef __PROSPERO__
+        if (astc && !x.sparse)   // (which size it was made at, for the passes that make it again: evict_textures)
+            x.tier = tex_tier::tier_of(std::max(x.width, x.height), bytes_at(0) > skip_from, max_dim_low, ps5_tex_roomy_dim(),
+                                       roomy_now);
         if (astc && !x.sparse) {   // (memory short: small for now, ps5_tex_reserve)
             const uint64_t room = hos_ps5_direct_room(), reserve = ps5_tex_reserve();
             const uint32_t cap = room < reserve / 2 ? 32 : 128;
@@ -5056,6 +5094,24 @@ void texture_frame(uint64_t completed) {
             evict.push_back({tex, false, false, false});
             n++, ps5_restored_n++;
         }
+    }
+    // (longshot) the size by free memory (ps5_tex_tier.h): while memory is roomy the textures made at RX_VK_TEX_MAX_DIM are
+    // made again at RX_VK_TEX_ROOMY_DIM, the most recently used first, two every ten presents; while it is not, the ones made
+    // roomy are made again at RX_VK_TEX_MAX_DIM, the least recently used first, sixteen at a time. The same exclusions
+    if (ps5_tex_roomy_dim() && !zone_boost_active()) {
+        const bool roomy = ps5_roomy_now();
+        int n = 0;
+        const int most = roomy ? 2 : 16;
+        auto take = [&](Texture* tex) {
+            if (!tex_tier::remake(tex->tier, roomy) || tex->gpu_written || tex->released || tex->last_value > completed) return;
+            if (std::any_of(evict.begin(), evict.end(), [&](const Evict& e) { return e.tex == tex; })) return;
+            evict.push_back({tex, false, false, false});
+            n++, (roomy ? ps5_tier_up_n : ps5_tier_down_n)++;
+        };
+        if (roomy)
+            for (auto it = order.rbegin(); it != order.rend() && n < most; ++it) take(it->second);
+        else
+            for (auto it = order.begin(); it != order.end() && n < most; ++it) take(it->second);
     }
 #endif
     evict_reason::Tally tally;                     // (why each one goes: the retired line below)

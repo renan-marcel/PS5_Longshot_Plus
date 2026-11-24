@@ -42,6 +42,7 @@ MODELS = {
         "env": {
             "RX_VK_COMPILE_SHADERS": "most",
             "RX_VK_TEX_MAX_DIM": "512",
+            "RX_VK_TEX_ROOMY_DIM": "1024",   # (1024 while free memory allows: gpu/vk/ps5_tex_tier.h)
             "RX_VK_TEX_SKIP_MB": "2",
             "RX_VK_WB_MAX_KB": "1024",
             "HOS_PS5_ZERO_FIRST": "1",

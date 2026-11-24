@@ -79,7 +79,8 @@ together.
       generation)
 - [ ] A scene's first frames: 0.3-0.6 s, 3 s where its shaders are met for the first time
 - [ ] Memory: Hyrule Castle Town ran out on arrival with textures of up to 1024 texels (two runs of three); the console's
-      default is 512 (`RX_VK_TEX_MAX_DIM`), where the town plays with 180-500 MiB of 13.2 GB free and a few shaders still
+      default is 512 (`RX_VK_TEX_MAX_DIM`; on a PS5 / PS5 Slim 1024 while the title's free memory is past the reserve and
+      512 MiB, `RX_VK_TEX_ROOMY_DIM`, gpu/vk/ps5_tex_tier.h), where the town plays with 180-500 MiB of 13.2 GB free and a few shaders still
       fail to translate for want of memory. The heap gives back what a burst of shader compiles took (PS5_PayloadSDK 55a2de0: 2.0 GB
       mapped after a start that compiles every pipeline, where it stayed at 3.4 with 0.7 in use). Images come from 32 MB
       blocks and the recordings' descriptor pools are an eighth of upstream's (`RX_VK_DESC_POOL_DIV=8`): the town's lowest
