@@ -436,7 +436,7 @@ static uint64_t ps5_render_budget(uint64_t own) {
     static const uint64_t cap0 = (getenv("HOS_PS5_RENDER_MB") ? (uint64_t)atoi(getenv("HOS_PS5_RENDER_MB")) : 2560) << 20;
     static const uint64_t reserve0 = (getenv("HOS_PS5_RESERVE_MB") ? (uint64_t)atoi(getenv("HOS_PS5_RESERVE_MB")) : 2048) << 20;
     // (longshot) the Memory margin row, at once: Safe a smaller renderer and more kept for the game, Performance the other way
-    const uint64_t cap = (uint64_t)((int64_t)cap0 + ps5_memory_delta(-(256ll << 20), 512ll << 20));
+    const uint64_t cap = (uint64_t)((int64_t)cap0 + ps5_memory_delta(-(256ll << 20), 256ll << 20));
     const uint64_t reserve = (uint64_t)std::max<int64_t>((int64_t)reserve0 + ps5_memory_delta(256ll << 20, -(256ll << 20)), 512ll << 20);
     const uint64_t free_now = hos_ps5_direct_room();
     const uint64_t room = own + (free_now > reserve ? free_now - reserve : 0);

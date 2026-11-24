@@ -42,7 +42,6 @@ MODELS = {
         "env": {
             "RX_VK_COMPILE_SHADERS": "most",
             "RX_VK_TEX_MAX_DIM": "512",
-            "RX_VK_TEX_ROOMY_DIM": "1024",   # (1024 while free memory allows: gpu/vk/ps5_tex_tier.h)
             "RX_VK_TEX_SKIP_MB": "2",
             "RX_VK_WB_MAX_KB": "1024",
             "HOS_PS5_ZERO_FIRST": "1",
@@ -51,6 +50,8 @@ MODELS = {
             "RX_VK_EXACT_STALE": "1",
             "HOS_PS5_RENDER_MB": "2560",
             "HOS_PS5_TEX_RESERVE_MB": "1800",
+            # (the title closes itself under 400 MiB free, not 220: a base console's kernel panicked at 1024 textures)
+            "HOS_PS5_MEM_FLOOR_MB": "400",
             "RX_VK_EVICT_MIN_UNUSED": "30",
         },
     },

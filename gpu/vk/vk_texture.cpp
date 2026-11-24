@@ -83,12 +83,18 @@ namespace mkwvk {
 // and evict_textures makes it again at its own size once more than the reserve and a quarter is free.
 /// (longshot) The Memory margin row (opts.ps5_memory): what it moves the reserves by. Safe keeps 400 MB more for the game,
 /// Performance 300 MB less (vk_vma.cpp moves the renderer's own the same way)
+/// (longshot) A PS5 Pro (its profile's renderer of 3200 MB and up): a base PS5's kernel panicked out of memory, and a panic
+/// restores that console to its factory state, so the rows' riskier choices (1024 textures, Performance) are the Pro's only
+bool ps5_is_pro() {
+    static const bool pro = getenv("HOS_PS5_RENDER_MB") && atoi(getenv("HOS_PS5_RENDER_MB")) >= 3200;
+    return pro;
+}
 int64_t ps5_memory_delta(int64_t safe, int64_t performance) {
-    return opts.ps5_memory == 1 ? safe : opts.ps5_memory == 2 ? performance : 0;
+    return opts.ps5_memory == 1 ? safe : opts.ps5_memory == 2 && ps5_is_pro() ? performance : 0;
 }
 uint64_t ps5_tex_reserve() {   // (vk_vma.cpp asks too)
     static const uint64_t v = (uint64_t)(getenv("HOS_PS5_TEX_RESERVE_MB") ? atoi(getenv("HOS_PS5_TEX_RESERVE_MB")) : 2200) << 20;
-    const int64_t r = (int64_t)v + ps5_memory_delta(400ll << 20, -(300ll << 20));
+    const int64_t r = (int64_t)v + ps5_memory_delta(400ll << 20, -(150ll << 20));
     return r > (512ll << 20) ? (uint64_t)r : 512ull << 20;
 }
 static std::atomic<uint64_t> ps5_pressed_n{0}, ps5_restored_n{0};
@@ -100,7 +106,7 @@ uint32_t ps5_tex_roomy_dim() {   // (the Texture size row's Auto only: its 512 a
 /// (longshot) The Texture size row (opts.ps5_textures): Auto keeps RX_VK_TEX_MAX_DIM (and the size by free memory over it),
 /// 512 and 1024 fix the limit
 uint32_t ps5_row_low(uint32_t low) {
-    return opts.ps5_textures == 1 ? 512u : opts.ps5_textures == 2 ? std::max(low, 1024u) : low;
+    return opts.ps5_textures == 1 ? 512u : opts.ps5_textures == 2 && ps5_is_pro() ? std::max(low, 1024u) : low;
 }
 static std::atomic<bool> ps5_roomy_state{false};
 static std::atomic<uint64_t> ps5_tier_up_n{0}, ps5_tier_down_n{0};

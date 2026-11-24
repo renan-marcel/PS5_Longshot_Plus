@@ -1595,11 +1595,11 @@ Row rows[] = {
     {TAB_GRAPHICS, "Texture size", &opts.ps5_textures, 0, 2, 1, tx_ps5_textures,
      "How wide the game's largest textures are kept. Auto: 1024 while the console has memory to spare, 512 when it does not. "
      "512: always, the safest in crowded places such as Castle Town. 1024: always, the sharpest; on a PS5 or PS5 Slim it may "
-     "close the game where memory runs short. For textures made from now on.", nullptr, false, true},
+     "close the game where memory runs short, so a PS5 or PS5 Slim stays at 512. For textures made from now on.", nullptr, false, true},
     {TAB_GRAPHICS, "Memory margin", &opts.ps5_memory, 0, 2, 1, tx_ps5_memory,
      "How the console's memory is shared. Standard: as measured for this console. Safe: more kept for the game (400 MB), "
      "for a game that closes for want of memory; textures give way sooner. Performance: more for the textures and the "
-     "renderer (300-512 MB), for a little more detail, with more risk in crowded places. Applies at once.", nullptr, false, true},
+     "renderer (150-256 MB), PS5 Pro only (a PS5 or PS5 Slim keeps Standard's). Applies at once.", nullptr, false, true},
     {TAB_GRAPHICS, "GPU device", &opts.gpu_device, 0, 8, 1, tx_gpu,
      "Which graphics card the game runs on. Applies after a restart.", hn_gpu, true, true},
     // (longshot, threaded_rendering.h: the render thread and the recorder thread together, one row. Auto, On, Off as V-Sync's,

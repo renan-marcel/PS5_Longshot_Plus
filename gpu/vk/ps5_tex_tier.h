@@ -2,13 +2,13 @@
    memory"). No Vulkan here: tests/test_ps5_tex_tier.py.
 
    A decoded ASTC texture wider than RX_VK_TEX_MAX_DIM (512 on a PS5 / PS5 Slim) leaves out its top levels: the base
-   console's 12,016 MiB do not hold the town at 1024 (docs/PS5.md). With RX_VK_TEX_ROOMY_DIM (1024 in that profile) the
+   console's 12,016 MiB do not hold the town at 1024 (docs/PS5.md). With RX_VK_TEX_ROOMY_DIM (no profile sets it: a base PS5's kernel panicked with it at 1024) the
    limit follows the memory instead:
-   - roomy: while the title has more than the reserve (HOS_PS5_TEX_RESERVE_MB) + RX_VK_TEX_ROOMY_MB (512) free, new
+   - roomy: while the title has more than the reserve (HOS_PS5_TEX_RESERVE_MB) + RX_VK_TEX_ROOMY_MB (1536) free, new
      textures are made up to RX_VK_TEX_ROOMY_DIM, and the ones made at the low size are made again at the roomy one;
    - not roomy: below that, new ones are made at RX_VK_TEX_MAX_DIM, and the ones made roomy are made again at it, the
      least recently used first;
-   - RX_VK_TEX_ROOMY_HYST_MB (128) either side of the line: a scene whose free memory sits on it does not flip each frame.
+   - RX_VK_TEX_ROOMY_HYST_MB (256) either side of the line: a scene whose free memory sits on it does not flip each frame.
    Below the reserve itself the older rule still holds: 128 texels, 32 under half of it (ps5_tex_reserve). */
 #pragma once
 
@@ -25,7 +25,7 @@ enum : uint8_t {
 };
 
 struct Line {
-    uint64_t reserve = 0, margin = 512 * kMB, hysteresis = 128 * kMB;
+    uint64_t reserve = 0, margin = 1536 * kMB, hysteresis = 256 * kMB;   // (conservative: a base PS5 panicked at 512 / 128)
 };
 
 /// Whether memory is roomy now, from whether it was: up above reserve + margin + hysteresis, down below reserve + margin -

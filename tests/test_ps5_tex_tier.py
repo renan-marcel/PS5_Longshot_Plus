@@ -25,14 +25,14 @@ using namespace mkwvk::tex_tier;
 int main() {
     Line l;
     l.reserve = 1800 * kMB;                  // (the PS5 / PS5 Slim profile's HOS_PS5_TEX_RESERVE_MB)
-    CHECK(l.margin == 512 * kMB && l.hysteresis == 128 * kMB);
-    // up only past 1800 + 512 + 128; down only under 1800 + 512 - 128; between, as it was
-    CHECK(!roomy(false, 2440 * kMB, l));
-    CHECK(roomy(false, 2441 * kMB, l));
-    CHECK(roomy(true, 2441 * kMB, l));
-    CHECK(roomy(true, 2184 * kMB, l));
-    CHECK(!roomy(true, 2183 * kMB, l));
-    CHECK(!roomy(false, 2300 * kMB, l) && roomy(true, 2300 * kMB, l));
+    CHECK(l.margin == 1536 * kMB && l.hysteresis == 256 * kMB);
+    // up only past 1800 + 1536 + 256; down only under 1800 + 1536 - 256; between, as it was
+    CHECK(!roomy(false, 3592 * kMB, l));
+    CHECK(roomy(false, 3593 * kMB, l));
+    CHECK(roomy(true, 3593 * kMB, l));
+    CHECK(roomy(true, 3080 * kMB, l));
+    CHECK(!roomy(true, 3079 * kMB, l));
+    CHECK(!roomy(false, 3300 * kMB, l) && roomy(true, 3300 * kMB, l));
     // the limit
     CHECK(dim_now(512, 1024, true) == 1024 && dim_now(512, 1024, false) == 512);
     CHECK(dim_now(512, 0, true) == 512 && dim_now(1024, 512, true) == 1024);   // (off, or not wider: the low limit)
@@ -79,8 +79,8 @@ def main():
     need("uint8_t tier = 0;" in (ROOT / "gpu/vk/vk_texture.h").read_text(encoding="utf-8"), "Texture has its tier")
     pipe = (ROOT / "ps5/builder/pipeline.py").read_text(encoding="utf-8")
     base = pipe[pipe.index('"base": {'):pipe.index('"pro": {')]
-    need('"RX_VK_TEX_ROOMY_DIM": "1024"' in base and '"RX_VK_TEX_MAX_DIM": "512"' in base,
-         "the PS5 / PS5 Slim profile: 512, 1024 while memory allows")
+    need('RX_VK_TEX_ROOMY_DIM' not in base and '"RX_VK_TEX_MAX_DIM": "512"' in base and '"HOS_PS5_MEM_FLOOR_MB": "400"' in base,
+         "the PS5 / PS5 Slim profile: 512 always (a base console panicked at 1024), the floor at 400 MiB")
     print("PASS: the texture size follows the free memory, with hysteresis, both ways")
 
 

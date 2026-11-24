@@ -33,13 +33,14 @@ def main():
     header = (ROOT / "gpu/vk/vk_menu.h").read_text(encoding="utf-8")
     need("int ps5_textures = 0;" in header and "int ps5_memory = 0;" in header, "Auto and Standard by default")
     tex = (ROOT / "gpu/vk/vk_texture.cpp").read_text(encoding="utf-8")
-    need("return opts.ps5_textures == 1 ? 512u : opts.ps5_textures == 2 ? std::max(low, 1024u) : low;" in tex, "512 / 1024 fixed")
+    need("opts.ps5_textures == 2 && ps5_is_pro() ? std::max(low, 1024u) : low;" in tex, "1024 on a Pro only")
+    need("opts.ps5_memory == 2 && ps5_is_pro() ? performance : 0;" in tex, "Performance on a Pro only")
     need("return opts.ps5_textures ? 0 : v;" in tex, "the size by free memory only on Auto")
     need("ps5_row_low(dim_env ?" in tex, "a texture's making takes the row")
-    need("ps5_memory_delta(400ll << 20, -(300ll << 20))" in tex and "r > (512ll << 20)" in tex, "the reserve: +400 / -300, >= 512 MB")
+    need("ps5_memory_delta(400ll << 20, -(150ll << 20))" in tex and "r > (512ll << 20)" in tex, "the reserve: +400 / -300, >= 512 MB")
     need("line.reserve = ps5_tex_reserve();" in tex, "the size by free memory follows the reserve at once")
     vma = (ROOT / "gpu/vk/vk_vma.cpp").read_text(encoding="utf-8")
-    need("ps5_memory_delta(-(256ll << 20), 512ll << 20)" in vma and "ps5_memory_delta(256ll << 20, -(256ll << 20))" in vma,
+    need("ps5_memory_delta(-(256ll << 20), 256ll << 20)" in vma and "ps5_memory_delta(256ll << 20, -(256ll << 20))" in vma,
          "the renderer's cap and reserve follow the row")
     print("PASS: the PS5's Texture size and Memory margin rows")
 
