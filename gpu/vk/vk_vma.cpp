@@ -227,6 +227,7 @@ bool image_compact_pass_end(uint64_t* freed_bytes, uint32_t* freed_blocks) {
 #ifdef __PROSPERO__
 extern "C" uint64_t hos_ps5_direct_room(void);   // (host/ps5/win32_ps5.c: the title's free direct memory in all)
 uint64_t ps5_tex_reserve();                      // (vk_texture.cpp: what is kept free for the game)
+int64_t ps5_memory_delta(int64_t safe, int64_t performance);   // (vk_texture.cpp: the Memory margin row)
 #endif
 bool create_image(const VkImageCreateInfo& ci, VkImage& image, VmaAllocation& allocation, bool dedicated, bool target, bool textures) {
 #ifdef __PROSPERO__
@@ -432,8 +433,11 @@ void vma_log_heaps() {
 /// already counted as the game's: the renderer grew to 3.3 GB of blocks with "8.3 of 8.6 GB" used while the game's next
 /// page found no memory.
 static uint64_t ps5_render_budget(uint64_t own) {
-    static const uint64_t cap = (getenv("HOS_PS5_RENDER_MB") ? (uint64_t)atoi(getenv("HOS_PS5_RENDER_MB")) : 2560) << 20;
-    static const uint64_t reserve = (getenv("HOS_PS5_RESERVE_MB") ? (uint64_t)atoi(getenv("HOS_PS5_RESERVE_MB")) : 2048) << 20;
+    static const uint64_t cap0 = (getenv("HOS_PS5_RENDER_MB") ? (uint64_t)atoi(getenv("HOS_PS5_RENDER_MB")) : 2560) << 20;
+    static const uint64_t reserve0 = (getenv("HOS_PS5_RESERVE_MB") ? (uint64_t)atoi(getenv("HOS_PS5_RESERVE_MB")) : 2048) << 20;
+    // (longshot) the Memory margin row, at once: Safe a smaller renderer and more kept for the game, Performance the other way
+    const uint64_t cap = (uint64_t)((int64_t)cap0 + ps5_memory_delta(-(256ll << 20), 512ll << 20));
+    const uint64_t reserve = (uint64_t)std::max<int64_t>((int64_t)reserve0 + ps5_memory_delta(256ll << 20, -(256ll << 20)), 512ll << 20);
     const uint64_t free_now = hos_ps5_direct_room();
     const uint64_t room = own + (free_now > reserve ? free_now - reserve : 0);
     return std::min(cap, room);

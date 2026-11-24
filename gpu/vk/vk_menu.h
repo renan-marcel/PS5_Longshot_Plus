@@ -112,6 +112,10 @@ struct Options {
     int robust = 0;       // bounds-checked buffer access: 0 Auto (on), 1 Off, 2 On (gpu/vk/vk_main.cpp; RX_VK_ROBUST)
     int descriptor_reuse = 1;  // (on by default since options_version 4) a draw keeps its descriptors through other slots' registrations (gpu/vk/vk_draw.cpp; RX_VK_DESC_REUSE)
     int sampler_cache = 0;     // sampler ids answer their parameters without the registrations' lock (gpu/vk/vk_draw.cpp; RX_VK_SAMPLER_CACHE)
+    int ps5_textures = 0;   // (longshot, PS5) Texture size: 0 Auto (by free memory: RX_VK_TEX_ROOMY_DIM, ps5_tex_tier.h),
+                            // 1 512 always, 2 1024 always (vk_texture.cpp ps5_row_low); for textures made from then on
+    int ps5_memory = 0;     // (longshot, PS5) Memory margin: 0 Standard (the profile's), 1 Safe (more kept for the game),
+                            // 2 Performance (more for textures and the renderer); applies at once (ps5_memory_delta)
     int shader_probe = 0;      // (longshot) the shader probe, for those working on the game: off by default; on, what watched
                                // dispatches are given goes to logs/crash_trace.txt (gpu/vk/vk_draw.cpp probe_wanted; RX_VK_PROBE_PROG)
     int astc_rgba8 = 0;   // (longshot) big ASTC textures kept as decoded RGBA8, not re-encoded to BC3 (gpu/vk/vk_texture.cpp bc_ready;

@@ -81,28 +81,39 @@ namespace mkwvk {
 // of play). So the last HOS_PS5_TEX_RESERVE_MB of free memory (1024) are the game's: below that a decoded ASTC texture, the
 // renderer's largest kind and the only one a level may be left out of, is made at 128 texels at most (32 below half of it),
 // and evict_textures makes it again at its own size once more than the reserve and a quarter is free.
+/// (longshot) The Memory margin row (opts.ps5_memory): what it moves the reserves by. Safe keeps 400 MB more for the game,
+/// Performance 300 MB less (vk_vma.cpp moves the renderer's own the same way)
+int64_t ps5_memory_delta(int64_t safe, int64_t performance) {
+    return opts.ps5_memory == 1 ? safe : opts.ps5_memory == 2 ? performance : 0;
+}
 uint64_t ps5_tex_reserve() {   // (vk_vma.cpp asks too)
     static const uint64_t v = (uint64_t)(getenv("HOS_PS5_TEX_RESERVE_MB") ? atoi(getenv("HOS_PS5_TEX_RESERVE_MB")) : 2200) << 20;
-    return v;
+    const int64_t r = (int64_t)v + ps5_memory_delta(400ll << 20, -(300ll << 20));
+    return r > (512ll << 20) ? (uint64_t)r : 512ull << 20;
 }
 static std::atomic<uint64_t> ps5_pressed_n{0}, ps5_restored_n{0};
 // (longshot) The size by free memory (ps5_tex_tier.h): RX_VK_TEX_ROOMY_DIM, 0 (off) unless the profile sets it
-uint32_t ps5_tex_roomy_dim() {
+uint32_t ps5_tex_roomy_dim() {   // (the Texture size row's Auto only: its 512 and 1024 are fixed, ps5_row_low)
     static const uint32_t v = getenv("RX_VK_TEX_ROOMY_DIM") ? (uint32_t)atoi(getenv("RX_VK_TEX_ROOMY_DIM")) : 0;
-    return v;
+    return opts.ps5_textures ? 0 : v;
+}
+/// (longshot) The Texture size row (opts.ps5_textures): Auto keeps RX_VK_TEX_MAX_DIM (and the size by free memory over it),
+/// 512 and 1024 fix the limit
+uint32_t ps5_row_low(uint32_t low) {
+    return opts.ps5_textures == 1 ? 512u : opts.ps5_textures == 2 ? std::max(low, 1024u) : low;
 }
 static std::atomic<bool> ps5_roomy_state{false};
 static std::atomic<uint64_t> ps5_tier_up_n{0}, ps5_tier_down_n{0};
 /// Whether the title's free memory is roomy now (with the line's hysteresis), said in the log each time it changes
 bool ps5_roomy_now() {
     if (!ps5_tex_roomy_dim()) return false;
-    static const tex_tier::Line line = [] {
+    static tex_tier::Line line = [] {
         tex_tier::Line l;
-        l.reserve = ps5_tex_reserve();
         if (const char* m = getenv("RX_VK_TEX_ROOMY_MB")) l.margin = (uint64_t)atoi(m) << 20;
         if (const char* h = getenv("RX_VK_TEX_ROOMY_HYST_MB")) l.hysteresis = (uint64_t)atoi(h) << 20;
         return l;
     }();
+    line.reserve = ps5_tex_reserve();   // (each time: the Memory margin row moves it)
     const uint64_t room = hos_ps5_direct_room();
     bool was = ps5_roomy_state.load(std::memory_order_relaxed);
     const bool now = tex_tier::roomy(was, room, line);
@@ -2138,7 +2149,11 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
         // 8192 x 8192 x 68 ASTC: 24 GB as RGBA8)
         const bool small_mips = low_vram_texture_mips();
         static const char* dim_env = getenv("RX_VK_TEX_MAX_DIM");
+#ifdef __PROSPERO__
+        const uint32_t max_dim_low = ps5_row_low(dim_env ? (uint32_t)atoi(dim_env) : small_mips ? 1024 : 2048);
+#else
         const uint32_t max_dim_low = dim_env ? (uint32_t)atoi(dim_env) : small_mips ? 1024 : 2048;
+#endif
 #ifdef __PROSPERO__
         // (longshot) PS5: wider while the title's free memory is roomy (RX_VK_TEX_ROOMY_DIM; ps5_tex_tier.h)
         const bool roomy_now = astc && ps5_roomy_now();
