@@ -49,7 +49,7 @@ MODELS = {
             "RX_VK_IMPORT_SPAN_MB": "16",
             "RX_VK_EXACT_STALE": "1",
             "HOS_PS5_RENDER_MB": "2560",
-            "HOS_PS5_TEX_RESERVE_MB": "2200",
+            "HOS_PS5_TEX_RESERVE_MB": "1800",
             "RX_VK_EVICT_MIN_UNUSED": "30",
         },
     },

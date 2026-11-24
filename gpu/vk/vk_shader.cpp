@@ -662,6 +662,9 @@ Shader::Profile make_profile() {
     // (RX_VK_FRAG_SHUFFLE_FALLBACK=0 or 1, a test: the fragment stages' shuffles native or through broadcasts, whatever the
     // driver; in the cache's stamp)
     if (const char* e = getenv("RX_VK_FRAG_SHUFFLE_FALLBACK")) p.has_broken_spirv_fragment_shuffle = e[0] == '1';
+    // Mesa encodes driverVersion with VK_MAKE_VERSION; an unknown version keeps the workaround on for RADV.
+    p.need_mesh_num_workgroups = dev.driver_id == VK_DRIVER_ID_MESA_RADV &&
+                                dev.props.driverVersion < VK_MAKE_VERSION(26, 2, 5);
     // (longshot) gathers nudged by 1/512 of a texel on AMD's and Intel's drivers, as Eden and Lichii have it (vk_vendor.h; in the
     // cache's stamp)
     p.need_gather_subpixel_offset = dev.fixes.gather_offset;
@@ -1363,7 +1366,8 @@ uint64_t translator_stamp() {
     const uint32_t depth = host->depth_minus_w() != 0;   // (d3zessete's PR 54: programs made in either depth mode are kept apart)
     add(&depth, sizeof depth);
     // (and a GPU's mesh shaders: a file of native task and mesh programs is no use to the compute fallback, nor its to one)
-    const uint32_t mesh = (dev.mesh_shader ? 1u : 0u) | (dev.mesh_fallback ? 2u : 0u) | (dev.task_mesh_fallback ? 4u : 0u);
+    const uint32_t mesh = (dev.mesh_shader ? 1u : 0u) | (dev.mesh_fallback ? 2u : 0u) |
+                          (dev.task_mesh_fallback ? 4u : 0u) | (profile().need_mesh_num_workgroups ? 16u : 0u);
     add(&mesh, sizeof mesh);
     // (and what of the GPU the translator is told (make_profile): its warps' lanes and the driver's shuffle workaround, and
     // which stages it pins to 32 lanes, which keep the short path: profile_graphics. An explicit warp override bypasses
