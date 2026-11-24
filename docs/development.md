@@ -1,5 +1,7 @@
 # Longshot
 
+For a map of the repository's subsystems and the PC/PS5 build paths, see the [architecture overview](architecture-overview.md).
+
 **Longshot** is the port's name (as Skybound is TOTKPort's and BlueShell is mkw-recomp's); the game builds as
 `longshot.exe` + `longshot_vk.dll` (`longshot` + `longshot_vk.so` on Linux).
 
