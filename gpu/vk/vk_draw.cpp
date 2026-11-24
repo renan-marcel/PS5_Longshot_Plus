@@ -356,6 +356,9 @@ extern "C" void hos_ps5_trace_note(const char* line);   // (a [PS5-PROBE] line i
 /// (longshot) The shader probe's programs: RX_VK_PROBE_PROG=<key>,... and, on the PS5, the program the GPU last stopped on in
 /// an earlier run (logs/crash_trace.txt: gpu_skip.h last_freeze), so a freeze that comes back is caught with its values
 bool probe_wanted(uint64_t key) {
+    // (the Debug tab's Shader probe row, off by default: off, nothing is watched, RX_VK_PROBE_PROG's programs neither, and the
+    // crash trace is not read; it applies at once)
+    if (!opts.shader_probe) return false;
     static const std::vector<uint64_t> want = [] {
         std::vector<uint64_t> v;
         for (const char* q = getenv("RX_VK_PROBE_PROG"); q && *q;) {
