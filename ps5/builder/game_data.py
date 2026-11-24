@@ -361,8 +361,8 @@ def main():
     import nup
     mark = os.path.join(a.app, DATA_MARK)
     stamp = stamp_of(a.nup or a.romfs)
-    if not a.folder:
-        stamp = "packs %s" % stamp
+    if not a.folder:   # (and the packs' format: a folder of an older format is made again, not kept as whole)
+        stamp = "packs v%d %s" % (data_packs.VERSION, stamp)
     whole = os.path.isfile(os.path.join(a.app, data_packs.INDEX_NAME)) if not a.folder else (
         os.path.isdir(os.path.join(a.app, DATA)) and not os.path.exists(os.path.join(a.app, data_packs.INDEX_NAME)))
     if read_text(mark) == stamp and whole:
