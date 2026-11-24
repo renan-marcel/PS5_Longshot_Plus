@@ -62,6 +62,7 @@
 #include "vk_texture.h"
 #include "movie_upscale_policy.h"
 #include "skip_code.h"
+#include "gpu_skip.h"
 #include "driver_faults.h"
 #include "fallback_size_policy.h"
 #include "translate_wait.h"
@@ -348,6 +349,75 @@ bool stats_prog_wanted(uint64_t key) {
     return std::find(want.begin(), want.end(), key) != want.end();
 }
 bool stats_frame_now();   // (below: the frame being measured is the current one)
+#ifdef __PROSPERO__
+extern "C" const char* hos_ps5_trace_path(void);       // (host/ps5/win32_ps5.c: logs/crash_trace.txt)
+extern "C" void hos_ps5_trace_note(const char* line);   // (a [PS5-PROBE] line into it, synchronously)
+#endif
+/// (longshot) The shader probe's programs: RX_VK_PROBE_PROG=<key>,... and, on the PS5, the program the GPU last stopped on in
+/// an earlier run (logs/crash_trace.txt: gpu_skip.h last_freeze), so a freeze that comes back is caught with its values
+bool probe_wanted(uint64_t key) {
+    static const std::vector<uint64_t> want = [] {
+        std::vector<uint64_t> v;
+        for (const char* q = getenv("RX_VK_PROBE_PROG"); q && *q;) {
+            char* end;
+            const uint64_t k = strtoull(q, &end, 16);
+            if (end == q) break;
+            v.push_back(k);
+            q = *end ? end + 1 : end;
+        }
+#ifdef __PROSPERO__
+        if (FILE* f = fopen(hos_ps5_trace_path(), "rb")) {
+            std::string text;
+            char buf[4096];
+            for (size_t n; (n = fread(buf, 1, sizeof buf, f)) > 0 && text.size() < (4u << 20);) text.append(buf, n);
+            fclose(f);
+            const gpu_skip::Freeze last = gpu_skip::last_freeze(text);
+            if (last.found && std::find(v.begin(), v.end(), last.key) == v.end()) {
+                v.push_back(last.key);
+                logf("vk: probe: %s program %016llx, the one the GPU last stopped on (logs/crash_trace.txt), is watched",
+                     last.compute ? "compute" : "graphics", (unsigned long long)last.key);
+            }
+        }
+#endif
+        return v;
+    }();
+    return !want.empty() && std::find(want.begin(), want.end(), key) != want.end();
+}
+/// (longshot) What a watched dispatch is given: its grid, the driver bank c0 and each of the game's constant buffers its program
+/// reads, as far as it reads them (Shader::Info constant_buffer_used_sizes; a bank's first KB at most). Every one is kept for
+/// the PS5's watchdog to write when the GPU stops presenting (zone_boost.h zone_probe_publish, host/ps5/win32_ps5.c); the first
+/// two of a run are written at once, as [PS5-PROBE] lines in logs/crash_trace.txt (elsewhere: the log)
+void probe_dispatch(const NvnState& s, const Program& p, bool indirect) {
+    if (p.stages.empty()) return;
+    const Stage& st = p.stages[0];
+    char line[ZONE_PROBE_LINE];
+    int n = snprintf(line, sizeof line, "dispatch %016llx present=%lld grid=%u,%u,%u%s", (unsigned long long)p.key,
+                     (long long)__atomic_load_n(&g_last_present_seen, __ATOMIC_RELAXED), s.grid[0], s.grid[1], s.grid[2],
+                     indirect ? " (indirect)" : "");
+    const auto room = [&] { return n > 0 && n < (int)sizeof line - 24; };
+    const uint32_t c0 = std::min<uint32_t>(st.info.constant_buffer_used_sizes[0], 0x100);
+    if (c0 && room()) n += snprintf(line + n, sizeof line - n, " c0:");
+    for (uint32_t off = 0; off < c0 && room(); off += 4)
+        n += snprintf(line + n, sizeof line - n, " %08x", driver_bank_word(s, 0, st.nvn_stage, off));
+    for (uint32_t i = 3; i < Shader::Info::MAX_CBUFS && room(); i++) {
+        const uint32_t used = std::min<uint32_t>(st.info.constant_buffer_used_sizes[i], 0x400);
+        if (!used || st.nvn_stage < 0 || st.nvn_stage >= kNvnStages || i - 3 >= 16) continue;
+        const nvn_p_bind_buf& u = s.ubo[st.nvn_stage][i - 3];
+        n += snprintf(line + n, sizeof line - n, " c%u@%llx/%llu:", i, (unsigned long long)u.addr, (unsigned long long)u.size);
+        for (uint32_t off = 0; off < used && room(); off += 4)
+            n += snprintf(line + n, sizeof line - n, " %08x", stage_cbuf_word(s, st, i, off));
+    }
+    if (!room() && n > 0) snprintf(line + std::min<int>(n, (int)sizeof line - 24), 24, " (cut)");
+    zone_probe_publish(line);
+    static std::atomic<int> noted{0};
+    if (noted.fetch_add(1, std::memory_order_relaxed) < 2) {
+#ifdef __PROSPERO__
+        hos_ps5_trace_note(line);
+#else
+        logf("vk: probe: %s", line);
+#endif
+    }
+}
 /// (EvilOOT) RX_VK_SKIP_FILE=<file>: the draws of the programs listed in it (hex keys, comma or newline separated) left out,
 /// the file read again whenever it changes (checked every 300 ms): a bisection in one run, from the scene being looked at
 bool skip_live(uint64_t key) {
@@ -7529,6 +7599,11 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     __atomic_store_n(&g_last_gfx_stage1, gfx_s1, __ATOMIC_RELAXED);
     __atomic_store_n(&g_last_present_seen, presents_now, __ATOMIC_RELAXED);
     if (skip_live(cp->key)) return;   // (EvilOOT, RX_VK_SKIP_FILE)
+    if (gpu_skip::contains(cp->key)) {   // (longshot: left out from the Debug tab's GPU freeze shader row, gpu_skip.h)
+        static std::atomic<int> told{0};
+        if (told++ < 8) logf("vk: draws of program %016llx left out (the Debug tab's skipped shaders)", (unsigned long long)cp->key);
+        return;
+    }
     {   // (longshot, RX_VK_SKIP_PROG=<key prefix,...>: draws too, their native code keys logged once; =-: none)
         // (OoT's 53509044401d78d2, by default only while its targets have no view: 128 draws, once while an area loads, that render
         // the slices of two 64^3 BC4 noise volumes through raw RGBA16UI views. Those views were not made (no attachment usage) and
@@ -10420,6 +10495,11 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
     if ((!cp || cp->failed || slow_network) && upscale_stub(cmd, s, compute_code_key(s))) return void(st_dispatches++);
     if (slow_network) SKIP_HERE();   // (an earlier pass of the network: the stub is its last pass)
     if (!cp || !cp->ready.load(std::memory_order_acquire) || cp->failed) SKIP_HERE();
+    if (gpu_skip::contains(cp->key)) {   // (longshot: left out from the Debug tab's GPU freeze shader row, gpu_skip.h)
+        static std::atomic<int> told{0};
+        if (told++ < 8) logf("vk: dispatches of program %016llx left out (the Debug tab's skipped shaders)", (unsigned long long)cp->key);
+        return;
+    }
     {   // (longshot, RX_VK_SKIP_PROG=<key prefix,...>: those programs' dispatches left out, for diagnosis)
         static const char* skip = getenv("RX_VK_SKIP_PROG");
         if (skip) {
@@ -10464,6 +10544,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
         }
     }
     dclock.key = cp->key;
+    if (probe_wanted(cp->key)) probe_dispatch(s, *cp, indirect != 0);   // (longshot: RX_VK_PROBE_PROG, the last freeze's program)
     texture_watch_prog(cp->key);
     {   // (longshot, RX_VK_LOG_PUSH=<key prefix>: once, that program's push constants and the c0 words it reads)
         static const char* want = getenv("RX_VK_LOG_PUSH");

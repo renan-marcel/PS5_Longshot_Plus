@@ -1212,6 +1212,8 @@ static uint64_t floor_bytes(void) {
     const char *e = getenv("HOS_PS5_MEM_FLOOR_MB");
     return (e && *e ? strtoull(e, NULL, 10) : 220) << 20;
 }
+static const char *const trace_paths[2] = {"/data/homebrew/PPSA99198/logs/crash_trace.txt",
+                                           "/data/longshot/PPSA99198/logs/crash_trace.txt"};
 static void ps5_write_crash_trace(const char *reason, uint64_t room_mb) {
     char buf[512];
     uint64_t raw_key = __atomic_load_n(&g_last_draw_key, __ATOMIC_RELAXED);
@@ -1228,14 +1230,30 @@ static void ps5_write_crash_trace(const char *reason, uint64_t room_mb) {
         (unsigned long long)gfx_key, (unsigned long long)gfx_s0, (unsigned long long)gfx_s1,
         (unsigned long long)cs_key, is_comp, (unsigned long long)pkey);
     if (n > 0) {
-        int fd = open("/data/homebrew/PPSA99198/logs/crash_trace.txt", O_WRONLY | O_CREAT | O_APPEND | O_SYNC, 0666);
-        if (fd < 0) fd = open("/data/longshot/PPSA99198/logs/crash_trace.txt", O_WRONLY | O_CREAT | O_APPEND | O_SYNC, 0666);
+        int fd = open(trace_paths[0], O_WRONLY | O_CREAT | O_APPEND | O_SYNC, 0666);
+        if (fd < 0) fd = open(trace_paths[1], O_WRONLY | O_CREAT | O_APPEND | O_SYNC, 0666);
         if (fd >= 0) {
             (void)write(fd, buf, (size_t)n);
             close(fd);
         }
         hos_ps5_klog_now("%s", buf);
     }
+}
+/* (longshot) The crash trace's file, for the Debug tab's GPU freeze shader row (gpu/vk/vk_menu.cpp, gpu/vk/gpu_skip.h): the
+   first of the two places that has one, else the first */
+const char *hos_ps5_trace_path(void) {
+    return access(trace_paths[0], F_OK) == 0 || access(trace_paths[1], F_OK) != 0 ? trace_paths[0] : trace_paths[1];
+}
+/* (longshot) A line of the shader probe (gpu/vk/vk_draw.cpp probe_dispatch) into the crash trace, as [PS5-PROBE] <line>:
+   synchronous, so it is there even when the GPU stops right after */
+void hos_ps5_trace_note(const char *line) {
+    int fd = open(trace_paths[0], O_WRONLY | O_CREAT | O_APPEND | O_SYNC, 0666);
+    if (fd < 0) fd = open(trace_paths[1], O_WRONLY | O_CREAT | O_APPEND | O_SYNC, 0666);
+    if (fd < 0) return;
+    (void)write(fd, "[PS5-PROBE] ", 12);
+    (void)write(fd, line, strlen(line));
+    (void)write(fd, "\n", 1);
+    close(fd);
 }
 
 static void ps5_crash_sig_handler(int sig) {
@@ -1273,6 +1291,11 @@ static void *memory_floor_watch(void *unused) {
         } else if (cur_p > 30 && !hang_logged && (now_t - last_progress_ms) >= 2000ULL) {
             hang_logged = 1;
             ps5_write_crash_trace("GPU_FREEZE_2S", room >> 20);
+            /* (and what the last watched dispatch was given, when the probe watches a program: RX_VK_PROBE_PROG, or the
+               program of the last freeze; gpu/vk/vk_draw.cpp probe_dispatch) */
+            static char probe[ZONE_PROBE_LINE + 32];
+            memcpy(probe, "last before the freeze: ", 24);
+            if (zone_probe_take(probe + 24, sizeof probe - 24)) hos_ps5_trace_note(probe);
         }
         zone_boost_update_mem(room >> 20, floor >> 20);
         if (room < floor) {

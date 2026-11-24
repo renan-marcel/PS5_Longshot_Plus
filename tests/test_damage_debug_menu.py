@@ -125,7 +125,9 @@ int main() {
         const int n = debug_rows(order, &dev, &heading);
         assert(heading >= 0);
         assert(dev == (env || enabled ? (int)std::size(expected) : kDebugGeneralRows));
-        assert(n == dev + 5); // Only the existing Developer rows follow.
+        // Only the Developer rows follow: Save my pipeline list, Descriptor reuse, Sampler cache, Robust buffers,
+        // ASTC as RGBA8, GPU freeze shader and Skipped shaders (no Intel or laptop rows on this card).
+        assert(n == dev + 7);
         for (int i = 0; i < dev; ++i) {
             const Row& row = rows[tab_row_to_global(TAB_DEBUG, order[i])];
             assert(!std::strcmp(row.name, expected[i]));

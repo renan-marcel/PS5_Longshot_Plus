@@ -28,6 +28,7 @@ RUN_ALL_ARGS = ["--cxx", "{cxx}"]
 ROOT = Path(__file__).resolve().parents[1]
 
 FIXTURE = r'''#include "gpu/vk/vk_menu_keys.h"
+#include "gpu/vk/gpu_skip.h"   // (the ini's gpu_skip= line)
 // API_ENUMS
 #include <algorithm>
 #include <atomic>
