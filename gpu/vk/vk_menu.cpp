@@ -1812,7 +1812,8 @@ Row rows[] = {
      "it out from now on, so the game goes on past the place it froze; what that shader draws or computes is then missing "
      "there. Its values are written to the crash trace for a fix."},
     {TAB_DEBUG, "Skipped shaders", nullptr, 0, 0, 0, nullptr,
-     "The shaders left out with GPU freeze shader, kept in longshot_options.ini. Enter draws them all again."},
+     "The shaders left out: yours from GPU freeze shader, kept in longshot_options.ini, and those the builder knows to hang "
+     "the GPU (longshot_env.txt, marked build). Enter draws them all again; the builder's are left out again at the next start."},
     // (longshot) the Gameplay tab's Bug report (vk_bug_report.h): A or Enter writes the report's folder; the help says what is in it
     {TAB_GAMEPLAY, "Bug report", nullptr, 0, 0, 0, nullptr,
      "Saves what an issue needs in a new folder, bug-reports in the game folder: report.txt with the issue form's answers (this "
@@ -2549,7 +2550,7 @@ const char* freeze_cell() {
 }
 /// (the Skipped shaders row's cell: None, or how many with what Enter does)
 std::string skipped_cell() {
-    const int n = gpu_skip::count.load(std::memory_order_acquire);
+    const int n = gpu_skip::total();   // (the player's and the builder's)
     return n ? "Restore " + std::to_string(n) : std::string("None");
 }
 /// (the line under the help for those two rows, while one is selected)
@@ -2562,11 +2563,12 @@ const char* freeze_hint(const Row& r) {
         if (!f.found) return "No earlier run stopped on a shader (logs/crash_trace.txt has no GPU freeze).";
         said = std::string("An earlier run stopped at frame ") + std::to_string(f.present) + " on " +
                (f.compute ? "compute" : "graphics") + " shader " + key +
-               (gpu_skip::contains(f.key) ? ": left out." : ". Skip leaves it out from now on.");
+               (gpu_skip::from_build_has(f.key) ? ": left out by the build (known to hang the GPU)."
+                : gpu_skip::contains(f.key) ? ": left out." : ". Skip leaves it out from now on.");
         return said.c_str();
     }
-    if (is_skipped_row(r) && gpu_skip::count.load(std::memory_order_acquire)) {
-        said = "Left out: " + gpu_skip::to_text() + ".";
+    if (is_skipped_row(r) && gpu_skip::total()) {
+        said = "Left out: " + gpu_skip::describe() + ".";
         return said.c_str();
     }
     return nullptr;
@@ -6503,10 +6505,11 @@ void menu_tick() {
         else if (press[7] && is_share_row(r)) share_pipeline_list(), press[7] = false, changed = true;
         else if (press[7] && is_laptop_row(r)) weak_laptop_apply(), press[7] = false, changed = true;
         else if (press[7] && is_freeze_row(r)) {   // (the shader the GPU last stopped on: left out from now on, and saved)
-            if (freeze_suspect().found && gpu_skip::add(freeze_suspect().key)) save();
+            const uint64_t key = freeze_suspect().key;   // (one the build leaves out already is not added to the ini)
+            if (freeze_suspect().found && !gpu_skip::contains(key) && gpu_skip::add(key)) save();
             press[7] = false, changed = true;
         } else if (press[7] && is_skipped_row(r)) {   // (every one drawn again)
-            if (gpu_skip::count.load(std::memory_order_acquire)) gpu_skip::clear(), save();
+            if (gpu_skip::total()) gpu_skip::restore_all(), save();   // (the builder's too, until the next start)
             press[7] = false, changed = true;
         }
         else if (press[7] && &r == &rows[kBugReportRow]) bug_report_save(), press[7] = false, changed = true;

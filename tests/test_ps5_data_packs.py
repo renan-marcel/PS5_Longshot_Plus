@@ -71,7 +71,7 @@ class Packs(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in data.iterdir()), ["Model.pak", "System.pak", "Voice.pak"])
         self.assertFalse((self.app / game_data.PROGRESS).exists())
         self.assertEqual((self.app / game_data.DATA_MARK).read_text(encoding="utf-8").strip(),
-                         "packs " + game_data.stamp_of(str(self.game)))
+                         "packs v%d %s" % (data_packs.VERSION, game_data.stamp_of(str(self.game))))
 
     def test_paths_and_listing_as_the_console_reads_them(self):
         build(self.app, self.game)
@@ -123,6 +123,19 @@ class Packs(unittest.TestCase):
         code, said = build(self.app, self.game)
         self.assertEqual(code, 0, said)
         self.assertNotIn("pack 1 of", said)   # (none written again)
+        self.assertEqual(self.index().read("System/plain.bin"), ROMFS["System/plain.bin"])
+
+    def test_packs_of_an_older_format_are_made_again(self):
+        # (a title folder from the format 1 builder: its mark named the same .nup, without the format; kept as whole, its
+        # Data.idx would be refused by the game: host/ps5/pak_romfs.c reads this format only)
+        build(self.app, self.game)
+        (self.app / game_data.DATA_MARK).write_text("packs " + game_data.stamp_of(str(self.game)) + "\n", encoding="utf-8")
+        old = self.app / data_packs.INDEX_NAME
+        old.write_bytes(b"LSIX" + old.read_bytes()[4:])
+        code, said = build(self.app, self.game)
+        self.assertEqual(code, 0, said)
+        self.assertNotIn("there already", said)
+        self.assertEqual(old.read_bytes()[:4], b"LSMF")
         self.assertEqual(self.index().read("System/plain.bin"), ROMFS["System/plain.bin"])
 
     def test_a_pack_cut_short_is_written_again(self):

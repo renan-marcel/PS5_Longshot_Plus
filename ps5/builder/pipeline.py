@@ -514,7 +514,41 @@ def link(kit, info, work, objects, lld, nm):
     return elf
 
 
-def title(kit, info, work, elf, native, out, model):
+KNOWN_GPU_HANGS = os.path.join(HERE, "known_gpu_hangs.txt")
+
+
+def known_gpu_hangs(path=KNOWN_GPU_HANGS):
+    """The program keys of known_gpu_hangs.txt: the first word of each line that is not a note, 16 hex digits (anything
+    else there stops the build: a list that says less than it seems to is worse than none)"""
+    keys = []
+    try:
+        lines = open(path, encoding="utf-8").read().splitlines()
+    except FileNotFoundError:
+        return keys
+    for n, line in enumerate(lines, 1):
+        words = line.split()
+        if not words or words[0].startswith("#"):
+            continue
+        key = words[0].lower()
+        if len(key) != 16 or any(c not in "0123456789abcdef" for c in key):
+            raise Stop("%s, line %d: %r is not a program key (16 hex digits)" % (path, n, words[0]))
+        if key not in keys:
+            keys.append(key)
+    return keys
+
+
+def env_text(profile, hangs):
+    """longshot_env.txt: the profile's switches, then the shaders known to hang the GPU (RX_VK_GPU_SKIP, gpu/vk/gpu_skip.h)"""
+    text = ("# Longshot on the PS5: the switches of the profile this folder was built for (%s).\n"
+            "# NAME=VALUE lines; a line starting with # is a note.\n" % profile["name"])
+    text += "".join("%s=%s\n" % kv for kv in sorted(profile["env"].items()))
+    if hangs:
+        text += ("# shaders known to hang the GPU, left out (the builder's known_gpu_hangs.txt; without them: --no-known-skips)\n"
+                 "RX_VK_GPU_SKIP=%s\n" % ",".join(hangs))
+    return text
+
+
+def title(kit, info, work, elf, native, out, model, known_skips=True):
     step(5)
     app = os.path.join(out, info["title_id"])
     if os.path.exists(app):
@@ -538,12 +572,13 @@ def title(kit, info, work, elf, native, out, model):
     j["attribute3"] = profile["attribute3"]
     with open(param, "w", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(j, indent=2) + "\n")
+    hangs = known_gpu_hangs() if known_skips else []   # (left out: known_gpu_hangs.txt; gpu/vk/gpu_skip.h reads the line)
     with open(os.path.join(app, "longshot_env.txt"), "w", encoding="utf-8", newline="\n") as f:
-        f.write("# Longshot on the PS5: the switches of the profile this folder was built for (%s).\n"
-                "# NAME=VALUE lines; a line starting with # is a note.\n" % profile["name"])
-        f.write("".join("%s=%s\n" % kv for kv in sorted(profile["env"].items())))
+        f.write(env_text(profile, hangs))
     say("profile: %s (attribute3 %#x%s)" % (profile["name"], profile["attribute3"],
                                            "".join("; %s=%s" % kv for kv in sorted(profile["env"].items()))))
+    say("shaders known to hang the GPU: %s" % (", ".join(hangs) + " left out" if hangs else
+                                               "none left out" + ("" if known_skips else " (--no-known-skips)")))
     size = sum(os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(app) for f in fs)
     say("title: %s (%d MB)" % (app, size >> 20))
     return app
@@ -656,7 +691,7 @@ def build(a):
     gen = lift(kit, work, exefs, a.lift_jobs or lift_processes(a.memory))
     objects = compile_game(kit, info, work, gen, clang, a.jobs or default_jobs(), a.memory)
     elf = link(kit, info, work, objects, lld, nm)
-    app = title(kit, info, work, elf, native, out, a.model)
+    app = title(kit, info, work, elf, native, out, a.model, not a.no_known_skips)
     shader_lists(kit, work, a.game, app)
     game_data(kit, work, a.game, app, a.data_folder)
     say("@@done " + app)
@@ -682,6 +717,8 @@ def main():
     ap.add_argument("--memory", type=float, default=0,
                     help="GB of memory the build may use (default: as much as is free). Lower is slower; %.0f at the least"
                     % MIN_MEMORY_GB)
+    ap.add_argument("--no-known-skips", action="store_true",
+                    help="draw the shaders known to hang the GPU (known_gpu_hangs.txt) instead of leaving them out")
     ap.add_argument("--data-folder", action="store_true",
                     help="the game's data as loose files in Data/ (for mods), not packs with an index (the default)")
     a = ap.parse_args()

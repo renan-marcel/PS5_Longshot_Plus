@@ -5,6 +5,8 @@
   over), and the program of the last GPU freeze read from a crash trace: a real one from a PS5 that froze twice on the compute
   program 53fcaee4dc45c6ee in a cutscene (its last freeze, the restarts after it), one with no freeze, one whose freeze is its
   last line, one with an earlier run's freeze and restarts after it.
+- the builder's list (RX_VK_GPU_SKIP, from ps5/builder/known_gpu_hangs.txt): left out from the start, never in the ini
+  text, marked (build) in the row's line, drawn again by the row's Enter for the run.
 - zone_boost.h's probe line: written and taken back whole.
 - The sources: draws and dispatches of a skipped program left out before they are recorded, the probe after every other
   check that leaves a dispatch out, the two Debug rows and their ini line, the watchdog writing the probe's last line when
@@ -13,6 +15,7 @@
     python -I -B tests/test_gpu_skip.py [--cxx g++]
 """
 import argparse
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -50,7 +53,13 @@ static std::string text_of(const char* path) {
 }
 
 int main(int argc, char** argv) {
-    // the list
+    // the builder's list, from the environment (the check runs with RX_VK_GPU_SKIP set: main's caller)
+    assert(gpu_skip::from_build().size() == 2);   // (a short key and a repeat passed over)
+    assert(gpu_skip::contains(0x1111111111111111ull) && gpu_skip::contains(0x2222222222222222ull));
+    assert(gpu_skip::from_build_has(0x1111111111111111ull) && gpu_skip::total() == 2);
+    assert(gpu_skip::to_text().empty());   // (not the player's: never written to the ini)
+    assert(gpu_skip::describe() == "1111111111111111 (build), 2222222222222222 (build)");
+    // the player's list
     assert(!gpu_skip::contains(0x53fcaee4dc45c6eeull));
     assert(gpu_skip::add(0x53fcaee4dc45c6eeull));
     assert(!gpu_skip::add(0x53fcaee4dc45c6eeull));   // (once)
@@ -58,8 +67,14 @@ int main(int argc, char** argv) {
     assert(gpu_skip::contains(0x53fcaee4dc45c6eeull) && !gpu_skip::contains(0x53fcaee4dc45c6efull));
     assert(gpu_skip::add(0x0123456789abcdefull));
     assert(gpu_skip::to_text() == "53fcaee4dc45c6ee,0123456789abcdef");
+    assert(gpu_skip::total() == 4);
+    assert(gpu_skip::describe() ==
+           "53fcaee4dc45c6ee, 0123456789abcdef, 1111111111111111 (build), 2222222222222222 (build)");
+    assert(gpu_skip::add(0x1111111111111111ull) && gpu_skip::total() == 4);   // (a builder's key the player adds: counted once)
+    assert(gpu_skip::describe() == "53fcaee4dc45c6ee, 0123456789abcdef, 1111111111111111, 2222222222222222 (build)");
     gpu_skip::clear();
     assert(gpu_skip::count.load() == 0 && !gpu_skip::contains(0x53fcaee4dc45c6eeull) && gpu_skip::to_text().empty());
+    assert(gpu_skip::contains(0x1111111111111111ull) && gpu_skip::total() == 2);   // (the player's list only)
     for (uint64_t k = 1; k <= gpu_skip::kMax; k++) assert(gpu_skip::add(k));
     assert(!gpu_skip::add(1000));   // (full)
     // the ini's text: keys of 16 hex digits; a short one, a long one and words passed over
@@ -67,6 +82,11 @@ int main(int argc, char** argv) {
     assert(gpu_skip::to_text() == "53fcaee4dc45c6ee,23677364611b9855");
     gpu_skip::from_text("");
     assert(gpu_skip::count.load() == 0);
+    // the row's Enter: every one drawn again, the builder's for this run
+    gpu_skip::add(0x53fcaee4dc45c6eeull);
+    gpu_skip::restore_all();
+    assert(!gpu_skip::contains(0x53fcaee4dc45c6eeull) && !gpu_skip::contains(0x1111111111111111ull));
+    assert(gpu_skip::total() == 0 && gpu_skip::describe().empty() && gpu_skip::to_text().empty());
     // the last freeze: argv[1] the real trace, [2] none, [3] a freeze as the last line, [4] restarts after the freeze
     gpu_skip::Freeze f = gpu_skip::last_freeze(text_of(argv[1]));
     assert(f.found && f.key == 0x53fcaee4dc45c6eeull && f.compute && f.present == 6674);
@@ -133,8 +153,10 @@ def sources():
          'if (!strcmp(line, "gpu_skip")) gpu_skip::from_text(eq + 1);' in menu, "gpu_skip= is not kept, written and read")
     press = menu[menu.index("else if (press[7] && is_freeze_row(r))"):]
     press = press[:press.index("else if (press[7] && &r == &rows[kBugReportRow])")]
-    need("gpu_skip::add(freeze_suspect().key)" in press and "gpu_skip::clear()" in press and press.count("save()") == 2,
-         "Enter on the rows does not skip, restore and save")
+    need("!gpu_skip::contains(key) && gpu_skip::add(key)" in press and "gpu_skip::restore_all()" in press and
+         press.count("save()") == 2, "Enter on the rows does not skip, restore (the builder's too) and save")
+    need("gpu_skip::total()" in body(menu, "std::string skipped_cell(") and "gpu_skip::describe()" in body(menu, "const char* freeze_hint("),
+         "the Skipped shaders row does not count and list the builder's too")
     # the watchdog
     freeze = ps5[ps5.index('ps5_write_crash_trace("GPU_FREEZE_2S", room >> 20);'):]
     freeze = freeze[:freeze.index("zone_boost_update_mem(")]
@@ -160,8 +182,9 @@ def main():
         cc = subprocess.run([a.cxx, "-std=c++17", "-O1", "-Wall", "-Werror", "-I",
                              str(ROOT / "gpu/vk"), str(tmp / "t.cpp"), "-o", str(exe), "-lpthread"], capture_output=True, text=True)
         need(cc.returncode == 0, "gpu_skip.h compiles: " + cc.stderr[-2000:])
+        env = dict(os.environ, RX_VK_GPU_SKIP="1111111111111111, abc,2222222222222222,1111111111111111")
         run = subprocess.run([str(exe)] + [str(tmp / n) for n in ("real.txt", "none.txt", "last.txt", "after.txt")],
-                             capture_output=True, text=True)
+                             capture_output=True, text=True, env=env)
         need(run.returncode == 0, "gpu_skip.h's checks: " + run.stdout + run.stderr[-2000:])
         print(run.stdout.strip())
 

@@ -59,7 +59,7 @@ instead, for mods. Format: [docs/ps5-data-packs.md](docs/ps5-data-packs.md).
 
 ## Known Gameplay Advisories
 
-* **⚠️ Monster Coliseum:** Currently **not recommended** due to a compute shader (`prog_key=53fcaee4dc45c6ee`) causing GPU hangs after ~30 seconds on RDNA 2. The same shader also froze a cutscene. **Debug tab → GPU freeze shader**: after a run that froze, it names the shader the GPU stopped on (`logs/crash_trace.txt`); **Skip** leaves it out from then on, so you can go on past that place (what it draws there is missing), and **Skipped shaders** puts them back. The next freeze on it also writes its inputs to `crash_trace.txt` (`[PS5-PROBE]` lines) for a fix.
+* **⚠️ Monster Coliseum:** Currently **not recommended** due to a compute shader (`prog_key=53fcaee4dc45c6ee`) causing GPU hangs after ~30 seconds on RDNA 2. The same shader also froze a cutscene. **Debug tab → GPU freeze shader**: after a run that froze, it names the shader the GPU stopped on (`logs/crash_trace.txt`); **Skip** leaves it out from then on, so you can go on past that place (what it draws there is missing), and **Skipped shaders** puts them back. The next freeze on it also writes its inputs to `crash_trace.txt` (`[PS5-PROBE]` lines) for a fix. The builder now leaves this shader out by default (`ps5/builder/known_gpu_hangs.txt`, written into `longshot_env.txt` as `RX_VK_GPU_SKIP`); turn off *Skip shaders known to hang the GPU* to draw it again.
 * **Verified Areas:** Kokiri Forest, Hyrule Field, Lon Lon Ranch, Kakariko, Zora's Domain, Gerudo Valley, and Forest Temple.
 * **Memory Safety:** If free memory drops below `220 MiB`, a clean `MEMORY_FLOOR_EXIT` triggers to protect saves; simply relaunch from the home screen.
 
