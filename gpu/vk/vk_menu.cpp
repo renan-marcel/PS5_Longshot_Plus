@@ -1814,6 +1814,11 @@ Row rows[] = {
     {TAB_DEBUG, "Skipped shaders", nullptr, 0, 0, 0, nullptr,
      "The shaders left out: yours from GPU freeze shader, kept in longshot_options.ini, and those the builder knows to hang "
      "the GPU (longshot_env.txt, marked build). Enter draws them all again; the builder's are left out again at the next start."},
+    // (longshot) the shader probe, for those working on the game (vk_draw.cpp probe_wanted): off by default
+    {TAB_DEBUG, "Shader probe", &opts.shader_probe, 0, 1, 1, tx_onoff,
+     "For those working on the game: what the shader the GPU last froze on (and those RX_VK_PROBE_PROG names) is given, "
+     "its grid and constant buffers, written to logs/crash_trace.txt as [PS5-PROBE] lines, and its last before a freeze. "
+     "Off, nothing is watched or written. Changes at once.", nullptr, false, true},
     // (longshot) the Gameplay tab's Bug report (vk_bug_report.h): A or Enter writes the report's folder; the help says what is in it
     {TAB_GAMEPLAY, "Bug report", nullptr, 0, 0, 0, nullptr,
      "Saves what an issue needs in a new folder, bug-reports in the game folder: report.txt with the issue form's answers (this "

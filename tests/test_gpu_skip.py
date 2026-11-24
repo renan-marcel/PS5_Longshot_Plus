@@ -146,6 +146,13 @@ def sources():
          "the probe keeps its line for the watchdog, notes its first ones and logs the banks the program reads")
     wanted = body(draw, "bool probe_wanted(")
     need('getenv("RX_VK_PROBE_PROG")' in wanted and "gpu_skip::last_freeze" in wanted, "the probe's programs: the switch and the last freeze's")
+    # (the Debug tab's Shader probe row: off by default, and off nothing is watched, the switch's programs neither, before the
+    # list is read)
+    need(wanted.index("if (!opts.shader_probe) return false;") < wanted.index("static const std::vector<uint64_t> want"),
+         "the probe does not stop first when the Shader probe row is off")
+    header = (ROOT / "gpu/vk/vk_menu.h").read_text(encoding="utf-8")
+    need("int shader_probe = 0;" in header, "the Shader probe row is not off by default")
+    need('{TAB_DEBUG, "Shader probe", &opts.shader_probe, 0, 1, 1, tx_onoff,' in menu, "the Debug tab has no Shader probe row")
     # the menu
     for name in ("GPU freeze shader", "Skipped shaders"):
         need('{TAB_DEBUG, "%s", nullptr, 0, 0, 0, nullptr,' % name in menu, "the Debug tab has no %s row" % name)

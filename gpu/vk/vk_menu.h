@@ -112,6 +112,8 @@ struct Options {
     int robust = 0;       // bounds-checked buffer access: 0 Auto (on), 1 Off, 2 On (gpu/vk/vk_main.cpp; RX_VK_ROBUST)
     int descriptor_reuse = 1;  // (on by default since options_version 4) a draw keeps its descriptors through other slots' registrations (gpu/vk/vk_draw.cpp; RX_VK_DESC_REUSE)
     int sampler_cache = 0;     // sampler ids answer their parameters without the registrations' lock (gpu/vk/vk_draw.cpp; RX_VK_SAMPLER_CACHE)
+    int shader_probe = 0;      // (longshot) the shader probe, for those working on the game: off by default; on, what watched
+                               // dispatches are given goes to logs/crash_trace.txt (gpu/vk/vk_draw.cpp probe_wanted; RX_VK_PROBE_PROG)
     int astc_rgba8 = 0;   // (longshot) big ASTC textures kept as decoded RGBA8, not re-encoded to BC3 (gpu/vk/vk_texture.cpp bc_ready;
                           // RX_VK_ASTC_RGBA8 over it): the AMD texture workaround. Read once, at the start
     int intel_compiles = 0;   // (longshot) Intel's shader compiler on Windows: 0 Auto (side by side where it was measured,
