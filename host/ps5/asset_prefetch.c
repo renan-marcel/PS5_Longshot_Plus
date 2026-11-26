@@ -575,6 +575,28 @@ static void visit_close(void) {   /* (mu held; a scene's visit ends: its opens i
 static char zone_now[SCENE_MAX];
 static asset_zone_cb zone_cb;
 void asset_prefetch_on_zone(asset_zone_cb cb) { __atomic_store_n(&zone_cb, cb, __ATOMIC_RELEASE); }
+/* Whether the current zone, or a zone it leads to, reads path (a romfs path); 1 when not known (no zones in the map) */
+int asset_prefetch_zone_wanted(const char *path) {
+    if (!path) return 1;
+    const size_t n = strlen(path);
+    pthread_mutex_lock(&mu);
+    int known = 0, want = 0;
+    const int s = scene_now[0] ? deps_scene(scene_now) : -1;
+    if (s >= 0 && dzones) {
+        known = 1;
+        const uint32_t own = dscene_zone[s];
+        for (uint32_t k = 0; !want && k <= dzones[own].ncount; k++) {
+            const DZone *z = &dzones[k == 0 ? own : dznbrs[dzones[own].nfirst + k - 1]];
+            for (uint32_t f = 0; !want && f < z->fcount; f++) {
+                const uint32_t pi = dzfiles[z->ffirst + f];
+                want = dpaths[2 * pi + 1] == n && !memcmp(dnames + dpaths[2 * pi], path, n);
+            }
+        }
+    }
+    pthread_mutex_unlock(&mu);
+    return known ? want : 1;
+}
+
 /* The game's current zone (its scene's: asset_prefetch_scene_now), "" before the first */
 const char *asset_prefetch_zone_now(void) { return zone_now; }
 

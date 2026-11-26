@@ -1327,6 +1327,8 @@ static void mem_write(const char *why, uint64_t room, uint64_t started_ms) {
                 room >> 20, (uint64_t)largest >> 20, __atomic_load_n(&committed_bytes, __ATOMIC_RELAXED) >> 20, ps.held_bytes >> 20,
                 __atomic_load_n(&g_zone_boost_until_ms, __ATOMIC_RELAXED) > now, renderer);
     hos_ps5_logfile("memory.txt", line);
+    extern int rx_vk_tags_wanted __attribute__((weak));   /* (gpu/vk/vk_texture.cpp: the renderer counts on its own thread) */
+    if (!strcmp(why, "after") && &rx_vk_tags_wanted) __atomic_store_n(&rx_vk_tags_wanted, 1, __ATOMIC_RELEASE);
 }
 
 static void *memory_floor_watch(void *unused) {
