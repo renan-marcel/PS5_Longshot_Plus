@@ -1,6 +1,6 @@
 # Memory at a zone change (PS5): design
 
-Status: approved for planning (2026-11-26) · Branch: `feature/zone-memory` (from `feature/amiibo`)
+Status: phases 1-4 built (2026-11-26), to be measured on the PS5; phase 5 waits for that session · Branch: `feature/zone-memory` (from `feature/amiibo`)
 
 ## The request
 

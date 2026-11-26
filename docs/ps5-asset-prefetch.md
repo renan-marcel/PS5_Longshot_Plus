@@ -25,8 +25,21 @@ None of this changes the game's own behaviour:
   starts loading. The file layer sees that open before the game says anything, and the read-ahead of that scene's files
   starts there, in parallel with the game's own reads.
 - **The current scene:** `host/hos_main.c` reads the game's `Sequence_CurrentBanc` every half second, the same value
-  behind the log's `map:` lines. This value is a `GameBancParam` name, the key of `Data.deps`. Once a scene has settled,
+  behind the log's `map:` lines (on the PS5 from the player's update, `hos_ps5_scene_poll` with `host/scene_poll.h`; before
+  2026-11-26 that read ran in the PC's debug tools only, and the PS5 never knew its scene). This value is a `GameBancParam` name, the key of `Data.deps`. Once a scene has settled,
   the scenes it leads to are read ahead, taken in turn a file at a time so that each gets its most certain files first.
+
+## Zones
+
+A **zone** is a place: a scene's zone is the folder of its own maps (`Banc/<folder>/<scene>_*`), so a place's child and
+adult scenes and its variants are one zone. A folder of more than 4 scenes (the game's boss and fight rooms, about 20,
+reached from everywhere) is no zone: each of its scenes is a zone of its own. No place names are in the code: the zones
+come from the person's game when the builder makes `Data.deps` (its `--report` lists them; on the game this was made
+with: 80 scenes, 59 zones).
+
+`Data.deps` version 2 holds them (each zone's scenes, its files, first wanted first, and the zones it leads to); version 1
+is still read, each scene its own zone. The game knows its zone (`asset_prefetch_zone_now`) and tells a **zone change**
+once (`asset_prefetch_on_zone`): `logs/memory.txt` is written then (`docs/PS5.md`).
 
 ## Data.deps (phase 1)
 
