@@ -1,6 +1,6 @@
 # PS5 Longshot Plus (`PPSA99198`) — Guía Oficial en Español
 
-**Port Nativo para PlayStation 5 y Builder Multiplataforma (Windows, Linux y macOS) — `v0.3.3-plus`**
+**Port Nativo para PlayStation 5 y Builder Multiplataforma (Windows, Linux y macOS) — `v0.3.5-plus`**
 
 > 🌐 **Idioma / Language:** [English (`README.md`)](README.md) · **Español (`README_ES.md`)**
 
@@ -16,10 +16,10 @@ Antes que nada, nuestro más sincero agradecimiento a:
 
 ---
 
-## Recomendaciones Críticas de Compilación e Instalación (`v0.3.3-plus`)
+## Recomendaciones Críticas de Compilación e Instalación (`v0.3.5-plus`)
 
 ### 1. En tu PC (Windows / Linux): Recompilar desde cero es ALTAMENTE RECOMENDADO (obligatorio para aplicar los cambios del núcleo)
-* Aunque el Builder permite actualizar compilaciones previas, para **`v0.3.3-plus`** es **altamente recomendado (prácticamente obligatorio) generar la carpeta `PPSA99198` completamente desde cero**.
+* Aunque el Builder permite actualizar compilaciones previas, para **`v0.3.5-plus`** es **altamente recomendado (prácticamente obligatorio) generar la carpeta `PPSA99198` completamente desde cero**.
 * **Por qué:** Esta versión actualiza el binario principal (`eboot.bin` / `image.bin`), incorpora el nuevo escáner automático de ROMs por *Title ID* en `/data/longshotplus/roms/`, añade el *watchdog* de telemetría de cómputo (`is_compute`) y aplica las correcciones atómicas de RDNA 2 (`#2088`).
 * **Cómo hacerlo:** Antes de pulsar **Build**, elimina o elige una carpeta de salida nueva para que no reutilice archivos intermedios viejos de `longshot-ps5-work`.
 
@@ -91,7 +91,7 @@ folder* (`--data-folder`) genera archivos sueltos en su lugar, para mods. Format
 
 ---
 
-## Resumen de Novedades Técnicas en `v0.3.3-plus`
+## Resumen de Novedades Técnicas en `v0.3.5-plus`
 
 * **Invalidación Exacta de Handles y Retención de Caché de Descriptores (`RX_VK_EXACT_STALE`, `#2343`)**: Registra el ID individual de cada textura eliminada o compactada (`gone_note`) y valida los *handles* en caché mediante `texture_still_resolved` en lugar de invalidar globalmente todos los descriptores del cuadro, reduciendo picos de CPU al cambiar de zona o cerrar menús en PS5.
 * **Perfil Interno `Auto (Esta PS5)` Adaptado por Hardware (`PS5 Fat/Slim` vs `PS5 Pro`)**: Configura automáticamente **`1280x720` con `35%` de nitidez** en **PS5 / PS5 Slim** (garantizando sesiones largas sin cierres por memoria al entrar y salir de zonas abiertas) y **`1920x1080 (native)` con `30%` de nitidez** en **PS5 Pro**, junto con `Modo TV`, `AMD FSR 3.1 / FSR 4`, resolución interna `Auto (dinámica)` y `FG integrada 2x`.
@@ -105,7 +105,7 @@ folder* (`--data-folder`) genera archivos sueltos en su lugar, para mods. Format
 * **Perfil Mejorado para PS5 Pro (`13.2 GiB` de memoria directa)**: Presupuesto de renderizador ampliado a 3.5 GiB (`HOS_PS5_RENDER_MB=3584`), reserva de texturas ajustada (`HOS_PS5_TEX_RESERVE_MB=1600`) y mayor retención de texturas a 1024 texels (`RX_VK_EVICT_MIN_UNUSED=60`) sin afectar la estabilidad de PS5 Fat / Slim.
 * **Plegado de Comparaciones con Signo en CPU (`A64_SUB_V`, `#1871`)**: Simplifica ~170,000 comparaciones con signo del código recompilado a una sola instrucción de CPU x86-64, reduciendo la carga del procesador y el tamaño de `image.bin` en PS5.
 
-### Comparativa de Perfiles: PS5 Fat / Slim vs PS5 Pro (`v0.3.3-plus`)
+### Comparativa de Perfiles: PS5 Fat / Slim vs PS5 Pro (`v0.3.5-plus`)
 
 | Característica / Parámetro | PS5 Fat / Slim (`base`) | PS5 Pro (`pro`) |
 | :--- | :--- | :--- |
@@ -126,16 +126,23 @@ folder* (`--data-folder`) genera archivos sueltos en su lugar, para mods. Format
 * **Telemetría ampliada en `crash_trace.txt`:** Registra `is_compute=1|0`, `prog_key`, `free_mem` y `zone_boost` en tiempo real sin búfer (`O_SYNC`).
 * **Mejoras del Builder (`#59`, `#62`, `#63`):** Incluye `PS5LongshotPlusBuilder-cli.cmd` redirigible en Windows, modo de bajo consumo de memoria (`2–3 GB` de RAM) y corrección del paso 6 en PyQt6.
 
-### Novedades en v0.3.3-plus
+### Novedades en v0.3.5-plus
+
+- **+400 MiB de Margen de Memoria Libre en PS5 Fat / Slim (`d80bc7ca3`)**: Aumenta `HOS_PS5_TEX_RESERVE_MB` a `1800` en consolas base para evitar cierres preventivos por memoria en sesiones largas.
+- **Fix de Reloj Congelado en Partidas Guardadas (`#1064` / `#2298`)**: Reactiva el avance del reloj del juego al cargar partidas guardadas fuera de Hyrule Field durante el bloqueo horario de la primera noche de Link adulto.
+- **Compatibilidad de `NumWorkgroups` en Mesh Shaders Nativos (`#2338`)**: Mantiene `NumWorkgroups` activo en *mesh shaders* nativos para RADV `< 26.2.5`.
+- **Badge Dinámico de Versión en el Builder (`e6dfa2b29`)**: La interfaz lee automáticamente el tag de versión del release.
+
+## Novedades en v0.3.4-plus / v0.3.3-plus
 - **Puesta a cero previa al mapeo de memoria guest (`#68`, `HOS_PS5_ZERO_FIRST=1`):** limpia los bloques de memoria directa antes de mapearlos al espacio del juego para evitar cierres por puntero nulo al cargar partidas.
 - **Chunks de importación GPU de 4 MB por defecto (`#74`, `RX_VK_IMPORT_CHUNK_MB=4`, `RX_VK_IMPORT_SPAN_MB=16`):** reduce páginas sin usar en PS5, liberando 200–330 MiB reales en PS5 Fat / Slim.
 - **Búsqueda O(1) de mutex por índice embebido (`#75`, `HOS_MUTEX_IX=1`):** guarda el índice del objeto host en `nn::os::MutexType + 8`, reduciendo la carga de CPU en sincronización.
 - **Mejoras de memoria y estabilidad upstream (`#2194`, `#2258`) + Watchdog Dual + `PS5_PayloadSDK` actualizado (`55a2de04`).**
 
-### Notas Estructurales y de Plataforma (v0.3.3-plus)
+### Notas Estructurales y de Plataforma (v0.3.5-plus)
 - **Builders Nativos para macOS e Interfaz Oscura PS5:** Añade paquetes `.app` autónomos para `macos-arm64` (Apple Silicon) y `macos-x64` (Intel) con Python 3.13, PyQt6, LLVM/Clang 23, herramientas Mach-O, icono Retina `longshot.icns`, rediseño oscuro estilo PS5 y corrección gráfica de Zora's Domain (`#2179`).
 - **Memoria y Sincronización PS5 (`#68`, `#74`, `#75`, `#2194`, `#2258`):** Puesta a cero previa al mapeo (`HOS_PS5_ZERO_FIRST=1`), *chunks* de importación GPU de 4 MB (`+200–330 MiB` libres en PS5 Fat/Slim), búsqueda O(1) de *mutex* por índice (`HOS_MUTEX_IX=1`), decodificación ASTC rápida vía LDS, Watchdog Dual (`crash_trace.txt`) y `PS5_PayloadSDK` (`55a2de04`).
-- **Regeneración Inicial de Shaders:** Al actualizar a `v0.3.3-plus`, el Builder invalida una sola vez `longshot-ps5-work` debido al nuevo sello del SDK y memoria Vulkan, regenerando los ~38,809 *shaders* conocidos; las siguientes compilaciones vuelven a tardar segundos.
+- **Regeneración Inicial de Shaders:** Al actualizar a `v0.3.5-plus`, el Builder invalida una sola vez `longshot-ps5-work` debido al nuevo sello del SDK y memoria Vulkan, regenerando los ~38,809 *shaders* conocidos; las siguientes compilaciones vuelven a tardar segundos.
 
 
 ---

@@ -1,6 +1,6 @@
 # PS5 Longshot Plus (`PPSA99198`)
 
-**PlayStation 5 Native Port & Cross-Platform Builder (Windows, Linux & macOS) — `v0.3.3-plus`**
+**PlayStation 5 Native Port & Cross-Platform Builder (Windows, Linux & macOS) — `v0.3.5-plus`**
 
 > 🌐 **Language / Idioma:** **English (`README.md`)** · [Español (`README_ES.md` — Guía Completa en Español)](README_ES.md)
 
@@ -14,9 +14,9 @@
 
 ---
 
-## Critical Build & Installation Recommendations (`v0.3.3-plus`)
+## Critical Build & Installation Recommendations (`v0.3.5-plus`)
 
-* **PC Rebuild (`v0.3.3-plus`):** Compiling a fresh `PPSA99198` folder from scratch is highly recommended due to updated console executables (`eboot.bin` / `image.bin`), automatic Title ID `.nup` scanning, compute watchdog telemetry, and RDNA 2 subgroup atomic fixes (`#2088`).
+* **PC Rebuild (`v0.3.5-plus`):** Compiling a fresh `PPSA99198` folder from scratch is highly recommended due to updated console executables (`eboot.bin` / `image.bin`), automatic Title ID `.nup` scanning, compute watchdog telemetry, and RDNA 2 subgroup atomic fixes (`#2088`).
 * **PS5 Clean Installation:** Overwriting files works, but deleting legacy shader caches (`cache/` and `radv-shader-cache/`) is strongly advised to prevent stale pipelines.
 
 ---
@@ -65,7 +65,7 @@ instead, for mods. Format: [docs/ps5-data-packs.md](docs/ps5-data-packs.md).
 
 ---
 
-## What's New in `v0.3.3-plus`
+## What's New in `v0.3.5-plus`
 
 * **Exact Handle Staleness & Descriptor Cache Retention (`RX_VK_EXACT_STALE`, `#2343`)**: Tracks individual destroyed or compacted texture IDs (`gone_note`) and validates cached descriptor handles via `texture_still_resolved` instead of globally invalidating every texture handle per frame, reducing CPU spikes during zone transitions and menu closures on PS5.
 * **Hardware-Aware `Auto (This PS5)` Preset (`PS5 Fat/Slim` vs `PS5 Pro`)**: Automatically configures **`1280x720` with `35%` sharpness** on **PS5 / PS5 Slim** (preventing memory pressure during extended multi-zone play sessions) and **`1920x1080 (native)` with `30%` sharpness** on **PS5 Pro**, paired with `TV Mode`, `AMD FSR 3.1 / FSR 4`, `Auto` dynamic internal resolution, and `2x` Built-in Frame Generation.
@@ -76,7 +76,7 @@ instead, for mods. Format: [docs/ps5-data-packs.md](docs/ps5-data-packs.md).
 
 * **Real-Time Clock (`Show clock` — `Off` / `12h` / `24h`)**: New option in **Gameplay** displaying the local system time in the top-right corner of the internal menu bar and the in-game HUD (automatically padded above the FPS counter when both are top-right).
 * **Compute Dispatch `RX_VK_SKIP_CODE` & Stage Code Telemetry**: Extended `RX_VK_SKIP_CODE` (and `RX_VK_SKIP_PROG` stage code logging) to compute dispatches to isolate and diagnose RDNA 2 compute shader hangs (such as Monster Coliseum `prog_key=53fcaee4dc45c6ee`).
-* **Enhanced PS5 Pro Profile (`13.2 GiB` Direct Memory)**: Expanded PS5 Pro builder profile (`HOS_PS5_RENDER_MB=3584`, `HOS_PS5_TEX_RESERVE_MB=1600`, `RX_VK_EVICT_MIN_UNUSED=60`) for 3.5 GiB renderer budget and sustained 1024-texel texture retention without affecting base PS5 / PS5 Slim stability.
+* **Enhanced PS5 Pro Profile (`13.2 GiB` Direct Memory)**: Expanded PS5 Pro builder profile (`HOS_PS5_RENDER_MB=3584`, `HOS_PS5_TEX_RESERVE_MB=1800 (base) / 1600 (Pro)`, `RX_VK_EVICT_MIN_UNUSED=60`) for 3.5 GiB renderer budget and sustained 1024-texel texture retention without affecting base PS5 / PS5 Slim stability.
 * **Recompiled CPU Signed-Compare Folding (`A64_SUB_V`, `#1871`)**: Folds subtraction overflow flags (`V = N xor (a < b)`) into single host comparisons across ~170,000 signed branch/select sites, reducing CPU overhead and binary size on PS5.
 * **RDNA 2 / RADV Compute Atomic Hang Fix (`#2088`)**: Serializes subgroup floating-point atomic add loops.
 * **Dedicated ROM Scanner (`/data/longshotplus/roms/`)**: Auto-detects valid `.nup` files.
@@ -842,7 +842,7 @@ By default, **PS5 Longshot Plus** runs safely with **AMD FSR 3.1**. To unlock **
 * **Recommended Stability Setting (Zero-Crash Long Sessions):** For players on **PS5 Fat / Slim** who want extended play sessions without sudden memory exits when repeatedly entering and exiting open areas (such as Hyrule Field, Kakariko Village, or Castle Town), open the in-game menu (**Touchpad Click + Options → Graphics**) and set **Output resolution** to **`1280x720`** with **`Built-in` (`FG integrada`)** frame generation—or tune the resolution scale to match your console model (**PS5 Fat/Slim** vs **PS5 Pro**).
 * **Console Model Selection:** The Builder includes dedicated profiles for both **PS5 / PS5 Slim** (12 GB unified memory, 512-texel limit) and **PS5 Pro** (expanded memory mode, 1024-texel limit).
 
-### PS5 Fat / Slim vs PS5 Pro Profile Comparison (`v0.3.3-plus`)
+### PS5 Fat / Slim vs PS5 Pro Profile Comparison (`v0.3.5-plus`)
 
 | Feature / Parameter | PS5 Fat / Slim (`base`) | PS5 Pro (`pro`) |
 | :--- | :--- | :--- |
@@ -857,13 +857,13 @@ By default, **PS5 Longshot Plus** runs safely with **AMD FSR 3.1**. To unlock **
 | **Default `Auto (This PS5)` Output & Sharpness** | `1280x720` (`35%` sharpness — zero-crash long sessions) | `1920x1080 (native)` (`30%` sharpness; supports up to 4K) |
 | **Default Upscaler & Frame Generation** | AMD FSR 3.1 (or FSR 4.1.2 Lite) + Built-in FG 2x | AMD FSR 3.1 (or FSR 4.1.2 Lite) + Built-in FG 2x |
 
-### What is new in v0.3.3-plus
+### What is new in v0.3.5-plus
 - **Pre-map guest memory zeroing (`#68`, `HOS_PS5_ZERO_FIRST=1`):** zeroes direct memory ranges before mapping into guest address space to prevent null-pointer crashes when loading saves.
 - **4 MB GPU import chunks by default (`#74`, `RX_VK_IMPORT_CHUNK_MB=4`, `RX_VK_IMPORT_SPAN_MB=16`):** cuts unused page commits on PS5, freeing 200–330 MiB on base PS5 / PS5 Slim.
 - **O(1) embedded mutex index lookup (`#75`, `HOS_MUTEX_IX=1`):** stores the host object index directly in `nn::os::MutexType + 8`, cutting mutex lookup overhead on PS5.
 - **Upstream stability & memory fixes (`#2194`, `#2258`) + Dual Watchdog + updated `PS5_PayloadSDK` (`55a2de04`).**
 
-### v0.3.3-plus Structural & Platform Notes
+### v0.3.5-plus Structural & Platform Notes
 - **macOS Native Builders & PS5 Dark UI:** Added `macos-arm64` (Apple Silicon) and `macos-x64` (Intel) `.app` bundles with Python 3.13, PyQt6, LLVM/Clang 23, Mach-O tools, Retina `longshot.icns` icon, and the redesigned PS5 dark UI (`#2179` Zora's Domain shader fix included).
 - **PS5 Memory & Sync (`#68`, `#74`, `#75`, `#2194`, `#2258`):** Pre-map zeroing (`HOS_PS5_ZERO_FIRST=1`), 4 MB GPU import chunks (`+200–330 MiB` free on PS5 Fat/Slim), O(1) embedded mutex index (`HOS_MUTEX_IX=1`), fast LDS ASTC decode, Dual Watchdog (`crash_trace.txt`), and updated `PS5_PayloadSDK` (`55a2de04`).
-- **First-Build Shader Cache Rebuild:** Upgrading to `v0.3.3-plus` invalidates `longshot-ps5-work` once due to the updated SDK and Vulkan memory stamp, regenerating the ~38,809 known pipelines cleanly; subsequent builds take seconds.
+- **First-Build Shader Cache Rebuild:** Upgrading to `v0.3.5-plus` invalidates `longshot-ps5-work` once due to the updated SDK and Vulkan memory stamp, regenerating the ~38,809 known pipelines cleanly; subsequent builds take seconds.
