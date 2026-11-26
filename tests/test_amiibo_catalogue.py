@@ -7,6 +7,7 @@ from pathlib import Path
 import hashlib
 import json
 import os
+import socket
 import struct
 import sys
 import tempfile
@@ -103,6 +104,50 @@ def main():
         need(t and os.path.isfile(os.path.join(t, "database", "amiibo.json")), "fetch of the fake archive")
         amiibo.API_URL = "http://127.0.0.1:9/x.zip"
         need(amiibo.fetch(str(cache)) == t, "a second fetch uses the unpacked tree")
+
+        # a server that accepts and never answers: fetch waits TIMEOUT, then None and nothing left
+        srv = socket.socket()
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        amiibo.API_URL = "http://127.0.0.1:%d/x.zip" % srv.getsockname()[1]
+        amiibo.TIMEOUT = 1
+        need(amiibo.fetch(str(tmp / "cache2")) is None, "a stalled download is a warning (a timeout)")
+        need(not any((tmp / "cache2").iterdir()), "a stalled download left files")
+        srv.close()
+
+        # an invalid database/amiibo.json: main() returns 0 and writes nothing
+        bad = tmp / "cache3" / ("AmiiboAPI-" + amiibo.API_COMMIT)
+        (bad / "database").mkdir(parents=True)
+        (bad / "database" / "amiibo.json").write_text("{not json", encoding="utf-8")
+        (bad / amiibo.UNPACKED).write_text("")
+        app = tmp / "app"
+        app.mkdir()
+        sys.argv = ["amiibo.py", "--app", str(app), "--cache", str(tmp / "cache3")]
+        need(amiibo.main() == 0, "main returns 0 when the catalogue cannot be written")
+        need(not any(app.iterdir()), "main wrote something: %r" % list(app.rglob("*")))
+
+        # write_catalogue raising part way leaves no .part file
+        real = amiibo.picture_pixels
+        amiibo.picture_pixels = lambda path: (_ for _ in ()).throw(RuntimeError("boom"))
+        try:
+            amiibo.write_catalogue(str(tree), str(tmp / "out2"))
+            need(False, "write_catalogue should have raised")
+        except RuntimeError:
+            pass
+        finally:
+            amiibo.picture_pixels = real
+        need(not [f for f in (tmp / "out2").iterdir() if f.name.endswith(".part")], "a .part file was left")
+        # and main() on a tree whose pictures fail the same way: 0, out folder gone
+        amiibo.picture_pixels = lambda path: (_ for _ in ()).throw(RuntimeError("boom"))
+        try:
+            ok = tmp / "cache4" / ("AmiiboAPI-" + amiibo.API_COMMIT)
+            ok.parent.mkdir()
+            tree.rename(ok)
+            (ok / amiibo.UNPACKED).write_text("")
+            sys.argv = ["amiibo.py", "--app", str(app), "--cache", str(tmp / "cache4")]
+            need(amiibo.main() == 0 and not any(app.iterdir()), "main after a failure part way")
+        finally:
+            amiibo.picture_pixels = real
     print("ok")
 
 

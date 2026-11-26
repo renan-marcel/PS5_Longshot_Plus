@@ -32,6 +32,7 @@ VERSION = 1
 MAX_W, MAX_H = 144, 180
 FIRST_SERIES = "The Legend of Zelda"
 UNPACKED = ".unpacked"
+TIMEOUT = 60   # (seconds a download may wait for the server, each time: a stalled one is a warning, not a hung build)
 
 
 def say(text):
@@ -57,11 +58,11 @@ def fetch(cache):
         if not os.path.exists(archive):
             os.makedirs(cache, exist_ok=True)
             say("downloading " + API_URL)
-            urllib.request.urlretrieve(API_URL, part)
             h = hashlib.sha256()
-            with open(part, "rb") as f:
-                for block in iter(lambda: f.read(1 << 20), b""):
+            with urllib.request.urlopen(API_URL, timeout=TIMEOUT) as r, open(part, "wb") as f:
+                for block in iter(lambda: r.read(1 << 20), b""):
                     h.update(block)
+                    f.write(block)
             if h.hexdigest() != API_SHA256:
                 raise OSError("its SHA-256 is %s, not the %s named in amiibo.py" % (h.hexdigest(), API_SHA256))
             os.replace(part, archive)
@@ -129,9 +130,20 @@ def write_catalogue(api_dir, out_dir):
     figures = read_figures(api_dir)
     os.makedirs(out_dir, exist_ok=True)
     comp = zstandard.ZstdCompressor(level=19)
+    pak = os.path.join(out_dir, "figures.pak")
+    idx = os.path.join(out_dir, "amiibo.idx")
+    try:
+        _write(figures, comp, pak, idx)
+    finally:
+        for path in (pak + ".part", idx + ".part"):
+            if os.path.exists(path):
+                os.remove(path)
+    return len(figures)
+
+
+def _write(figures, comp, pak, idx):
     records = []
     offset = 0
-    pak = os.path.join(out_dir, "figures.pak")
     with open(pak + ".part", "wb") as out:
         for fid, name, series, character, picture in figures:
             pic_offset = pic_size = w = h = 0
@@ -144,7 +156,6 @@ def write_catalogue(api_dir, out_dir):
                 offset += len(frame)
             records.append(fid + struct.pack("<QIHH", pic_offset, pic_size, w, h) + ascii_text(name, 48)
                            + ascii_text(series, 32) + ascii_text(character, 32))
-    idx = os.path.join(out_dir, "amiibo.idx")
     with open(idx + ".part", "wb") as f:
         f.write(MAGIC + struct.pack("<II", VERSION, len(records)) + b"".join(records))
     os.replace(pak + ".part", pak)
@@ -161,7 +172,16 @@ def main():
     if api is None:
         return 0
     out = os.path.join(args.app, "amiibo")
-    n = write_catalogue(api, out)
+    try:
+        n = write_catalogue(api, out)
+    except Exception as e:   # (a catalogue that cannot be made, a missing module: a warning, the build goes on)
+        for name in ("figures.pak.part", "amiibo.idx.part"):
+            if os.path.exists(os.path.join(out, name)):
+                os.remove(os.path.join(out, name))
+        if os.path.isdir(out) and not os.listdir(out):
+            os.rmdir(out)
+        say("warning: the amiibo catalogue was not written (%s: %s); the window will list no figures" % (type(e).__name__, e))
+        return 0
     say("%d figures, figures.pak %d bytes" % (n, os.path.getsize(os.path.join(out, "figures.pak"))))
     return 0
 
