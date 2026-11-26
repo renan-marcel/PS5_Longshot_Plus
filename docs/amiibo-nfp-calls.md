@@ -1,7 +1,7 @@
 # The game's nn::nfp imports
 
-The amiibo feature answers the game's `nn::nfp` calls in `host/nn_nfp.c` (a later change binds each function below). This
-page records which `nn::nfp` / `nn::nfc` functions the game imports, so that file and this table can be compared. It lists
+The amiibo feature answers the game's `nn::nfp` calls in `host/nn_nfp.c`, which binds each function below
+(`tests/test_nfp_hle_names.py` compares the two). This page records which `nn::nfp` / `nn::nfc` functions the game imports. It lists
 symbol names only, no game bytes. Regenerate the list from a build's work folder:
 
     python -I scripts/list_nfp_imports.py <work folder>
