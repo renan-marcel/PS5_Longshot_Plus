@@ -5,7 +5,7 @@
    nn::nfp calls to the functions here, and the renderer's menu picks, touches and removes a figure. No Ctx, no game:
    tests/amiibo_core_test.c runs it on the PC.
 
-   Threads: any. One mutex guards everything; the event hooks are called with it held (they must not call back in). */
+   Threads: any. One mutex guards everything; the event hooks are called after it is let go (they may call back in). */
 #ifndef HOS_AMIIBO_CORE_H
 #define HOS_AMIIBO_CORE_H
 #include <stddef.h>

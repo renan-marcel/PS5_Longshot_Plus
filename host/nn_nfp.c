@@ -13,11 +13,13 @@
    (AttachAvailabilityChangeEvent); the core's activate and deactivate have no guest event.
 
    Every call logs one "[NFP]" line (GetDeviceState, polled every frame, only when the state it gives changes): which calls
-   the game makes is not known yet (docs/amiibo-nfp-calls.md's "called in game"). hos_main.c gives the core its folder
-   (<user>/amiibo) and these hooks. */
+   the game makes is not known yet (docs/amiibo-nfp-calls.md's "called in game"). The log reaches logs/longshot_log.txt on the
+   PC; on the PS5 it goes to klog only, so there each line is also appended to <title folder>/logs/nfp.txt (up to 1 MB).
+   hos_main.c gives the core its folder (<user>/amiibo) and these hooks. */
 #include "hos.h"
 #include "amiibo_core.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,6 +28,76 @@
 #include <windows.h>
 #include <ntsecapi.h>   /* (RtlGenRandom, as hos_report_run.c) */
 #endif
+
+/* ---- the [NFP] lines: the host's log, and on the PS5 logs/nfp.txt too (NFP_FILE_LOG: tests/nfp_hle_test.c sets it on the PC) */
+#if defined(__PROSPERO__) && !defined(NFP_FILE_LOG)
+#define NFP_FILE_LOG 1
+#endif
+#ifdef NFP_FILE_LOG
+#include <pthread.h>
+#include <sys/stat.h>
+#ifndef NFP_FILE_CAP
+#define NFP_FILE_CAP (1L << 20)   /* (1 MB: then one line saying so, and no more) */
+#endif
+/* the crash trace's file, <title folder>/logs/crash_trace.txt: the title folder is found as the break's report finds it */
+const char *hos_ps5_trace_path(void);   /* (host/ps5/win32_ps5.c) */
+static pthread_mutex_t file_mu = PTHREAD_MUTEX_INITIALIZER;
+static FILE *file_log;
+static int file_state;   /* (0 not opened yet, 1 open, 2 closed: none could be opened, or full) */
+
+static void file_open(void) {
+    file_state = 2;
+    const char *trace = hos_ps5_trace_path();
+    const char *cut = trace ? strstr(trace, "/logs/crash_trace.txt") : NULL;
+    char path[1024];
+    const int n = cut ? snprintf(path, sizeof path, "%.*s/logs", (int)(cut - trace), trace) : -1;
+    if (n <= 0 || (size_t)n + sizeof "/nfp.txt" > sizeof path) return;
+    (void)mkdir(path, 0777);   /* (the logs/ folder, when it is not there yet) */
+    memcpy(path + n, "/nfp.txt", sizeof "/nfp.txt");
+    file_log = fopen(path, "a");
+    if (!file_log) return;
+    fseek(file_log, 0, SEEK_END);
+    if (ftell(file_log) >= NFP_FILE_CAP) {   /* (full from the runs before: this run's lines start it over) */
+        fclose(file_log);
+        file_log = fopen(path, "w");
+        if (!file_log) return;
+    }
+    file_state = 1;
+}
+
+static void file_line(const char *line) {
+    pthread_mutex_lock(&file_mu);
+    if (!file_state) file_open();
+    if (file_state == 1) {
+        fputs(line, file_log);
+        fputc('\n', file_log);
+        if (ftell(file_log) >= NFP_FILE_CAP) {
+            fputs("[NFP] nfp.txt is full (1 MB): no more lines in it this run (they are still in the log)\n", file_log);
+            fclose(file_log);
+            file_log = NULL;
+            file_state = 2;
+        } else {
+            fflush(file_log);
+        }
+    }
+    pthread_mutex_unlock(&file_mu);
+}
+#endif
+
+#if defined(__GNUC__)
+__attribute__((format(printf, 1, 2)))
+#endif
+static void nfp_log(const char *fmt, ...) {
+    char line[512];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(line, sizeof line, fmt, ap);
+    va_end(ap);
+    hos_log("%s", line);
+#ifdef NFP_FILE_LOG
+    file_line(line);
+#endif
+}
 
 void hos_system_event_init(uint64_t key, int autoclear);   /* nn_os_sync.c */
 void hos_system_event_signal(uint64_t key);
@@ -103,13 +175,14 @@ static uint32_t info(uint32_t (*fill)(uint8_t *), uint64_t out, size_t size, uin
 /* ---- the module */
 HLE(_ZN2nn3nfp10InitializeEv) {
     const uint32_t rc = amiibo_initialize();
-    hos_log("[NFP] Initialize -> %#x", rc);
+    nfp_log("[NFP] Initialize -> %#x", rc);
     RET(rc);
 }
 
 HLE(_ZN2nn3nfp8FinalizeEv) {
+    __atomic_store_n(&availability_event, 0, __ATOMIC_RELEASE);   /* (the game's event is its own again: never signalled after) */
     const uint32_t rc = amiibo_finalize();
-    hos_log("[NFP] Finalize -> %#x", rc);
+    nfp_log("[NFP] Finalize -> %#x", rc);
     RET(rc);
 }
 
@@ -119,7 +192,7 @@ HLE(_ZN2nn3nfp29AttachAvailabilityChangeEventEPNS_2os15SystemEventTypeE) {
         hos_system_event_init(ARG(0), 0);
         __atomic_store_n(&availability_event, ARG(0), __ATOMIC_RELEASE);
     }
-    hos_log("[NFP] AttachAvailabilityChangeEvent(%#llx)", (unsigned long long)ARG(0));
+    nfp_log("[NFP] AttachAvailabilityChangeEvent(%#llx)", (unsigned long long)ARG(0));
     RET(0);
 }
 
@@ -136,7 +209,7 @@ HLE(_ZN2nn3nfp11ListDevicesEPNS0_12DeviceHandleEPii) {
         const int32_t n = count;
         memcpy(count_out, &n, 4);
     }
-    hos_log("[NFP] ListDevices(max %d) -> %#x, %d device(s)", max, rc, rc ? 0 : count);
+    nfp_log("[NFP] ListDevices(max %d) -> %#x, %d device(s)", max, rc, rc ? 0 : count);
     RET(rc);
 }
 
@@ -145,7 +218,7 @@ HLE(_ZN2nn3nfp14GetDeviceStateERKNS0_12DeviceHandleE) {
     static int last_logged = -1;
     int s = handle_rc(ARG(0)) || device_rc() ? -1 : amiibo_device_state();
     if (s < 0) s = AMIIBO_STATE_UNAVAILABLE;
-    if (__atomic_exchange_n(&last_logged, s, __ATOMIC_RELAXED) != s) hos_log("[NFP] GetDeviceState -> state %d", s);
+    if (__atomic_exchange_n(&last_logged, s, __ATOMIC_RELAXED) != s) nfp_log("[NFP] GetDeviceState -> state %d", s);
     RET((uint32_t)s);
 }
 
@@ -155,7 +228,7 @@ HLE(_ZN2nn3nfp9GetNpadIdEPjRKNS0_12DeviceHandleE) {
     uint32_t rc = out ? handle_rc(ARG(1)) : AMIIBO_RC_INVALID_ARGUMENT;
     if (!rc) rc = device_rc();
     if (!rc) memset(out, 0, 4);
-    hos_log("[NFP] GetNpadId -> %#x", rc);
+    nfp_log("[NFP] GetNpadId -> %#x", rc);
     RET(rc);
 }
 
@@ -163,14 +236,14 @@ HLE(_ZN2nn3nfp9GetNpadIdEPjRKNS0_12DeviceHandleE) {
 HLE(_ZN2nn3nfp14StartDetectionERKNS0_12DeviceHandleE) {
     uint32_t rc = handle_rc(ARG(0));
     if (!rc) rc = amiibo_start_detection();
-    hos_log("[NFP] StartDetection -> %#x", rc);
+    nfp_log("[NFP] StartDetection -> %#x", rc);
     RET(rc);
 }
 
 HLE(_ZN2nn3nfp13StopDetectionERKNS0_12DeviceHandleE) {
     uint32_t rc = handle_rc(ARG(0));
     if (!rc) rc = amiibo_stop_detection();
-    hos_log("[NFP] StopDetection -> %#x", rc);
+    nfp_log("[NFP] StopDetection -> %#x", rc);
     RET(rc);
 }
 
@@ -178,39 +251,39 @@ HLE(_ZN2nn3nfp13StopDetectionERKNS0_12DeviceHandleE) {
 HLE(_ZN2nn3nfp5MountERKNS0_12DeviceHandleENS0_9ModelTypeENS0_11MountTargetE) {
     uint32_t rc = handle_rc(ARG(0));
     if (!rc) rc = amiibo_mount();
-    hos_log("[NFP] Mount(model %u, target %u) -> %#x", (unsigned)ARG(1), (unsigned)ARG(2), rc);
+    nfp_log("[NFP] Mount(model %u, target %u) -> %#x", (unsigned)ARG(1), (unsigned)ARG(2), rc);
     RET(rc);
 }
 
 HLE(_ZN2nn3nfp5FlushERKNS0_12DeviceHandleE) {
     uint32_t rc = handle_rc(ARG(0));
     if (!rc) rc = amiibo_flush();
-    hos_log("[NFP] Flush -> %#x", rc);
+    nfp_log("[NFP] Flush -> %#x", rc);
     RET(rc);
 }
 
 /* ---- the infos: Get*Info(Info* out, DeviceHandle const&) */
 HLE(_ZN2nn3nfp10GetTagInfoEPNS0_7TagInfoERKNS0_12DeviceHandleE) {
     const uint32_t rc = info(amiibo_tag_info, ARG(0), AMIIBO_TAG_INFO_SIZE, ARG(1));
-    hos_log("[NFP] GetTagInfo -> %#x", rc);
+    nfp_log("[NFP] GetTagInfo -> %#x", rc);
     RET(rc);
 }
 
 HLE(_ZN2nn3nfp12GetModelInfoEPNS0_9ModelInfoERKNS0_12DeviceHandleE) {
     const uint32_t rc = info(amiibo_model_info, ARG(0), AMIIBO_MODEL_INFO_SIZE, ARG(1));
-    hos_log("[NFP] GetModelInfo -> %#x", rc);
+    nfp_log("[NFP] GetModelInfo -> %#x", rc);
     RET(rc);
 }
 
 HLE(_ZN2nn3nfp13GetCommonInfoEPNS0_10CommonInfoERKNS0_12DeviceHandleE) {
     const uint32_t rc = info(amiibo_common_info, ARG(0), AMIIBO_COMMON_INFO_SIZE, ARG(1));
-    hos_log("[NFP] GetCommonInfo -> %#x", rc);
+    nfp_log("[NFP] GetCommonInfo -> %#x", rc);
     RET(rc);
 }
 
 HLE(_ZN2nn3nfp15GetRegisterInfoEPNS0_12RegisterInfoERKNS0_12DeviceHandleE) {
     const uint32_t rc = info(amiibo_register_info, ARG(0), AMIIBO_REGISTER_INFO_SIZE, ARG(1));
-    hos_log("[NFP] GetRegisterInfo -> %#x", rc);
+    nfp_log("[NFP] GetRegisterInfo -> %#x", rc);
     RET(rc);
 }
 
@@ -220,7 +293,7 @@ HLE(_ZN2nn3nfp19OpenApplicationAreaERKNS0_12DeviceHandleEj) {
     const uint32_t access_id = (uint32_t)ARG(1);
     uint32_t rc = handle_rc(ARG(0));
     if (!rc) rc = amiibo_open_area(access_id);
-    hos_log("[NFP] OpenApplicationArea(access %08x) -> %#x", access_id, rc);
+    nfp_log("[NFP] OpenApplicationArea(access %08x) -> %#x", access_id, rc);
     RET(rc);
 }
 
@@ -236,21 +309,25 @@ HLE(_ZN2nn3nfp18GetApplicationAreaEPvPmRKNS0_12DeviceHandleEm) {
         const uint64_t n = got;
         memcpy(size_out, &n, 8);
     }
-    hos_log("[NFP] GetApplicationArea(cap %#llx) -> %#x, %#llx bytes", (unsigned long long)cap, rc, (unsigned long long)got);
+    nfp_log("[NFP] GetApplicationArea(cap %#llx) -> %#x, %#llx bytes", (unsigned long long)cap, rc, (unsigned long long)got);
     RET(rc);
 }
 
-/* SetApplicationArea(DeviceHandle const&, void const* data, unsigned long size): a size over 0xD8 is the core's to refuse */
+/* SetApplicationArea(DeviceHandle const&, void const* data, unsigned long size): a size over 0xD8 is
+   WrongApplicationAreaSize, whatever the data's address (it is looked at after the size) */
 HLE(_ZN2nn3nfp18SetApplicationAreaERKNS0_12DeviceHandleEPKvm) {
     const uint64_t size = ARG(2);
     uint32_t rc = handle_rc(ARG(0));
-    if (!rc) rc = amiibo_set_area(guest(ARG(1), size < AMIIBO_AREA_SIZE ? size : AMIIBO_AREA_SIZE), (size_t)size);
-    hos_log("[NFP] SetApplicationArea(size %#llx) -> %#x", (unsigned long long)size, rc);
+    if (!rc && size > AMIIBO_AREA_SIZE) rc = AMIIBO_RC_WRONG_APPLICATION_AREA_SIZE;
+    if (!rc) rc = amiibo_set_area(guest(ARG(1), size), (size_t)size);
+    nfp_log("[NFP] SetApplicationArea(size %#llx) -> %#x", (unsigned long long)size, rc);
     RET(rc);
 }
 
 /* ApplicationAreaCreateInfo (the SDK's order: accessId, pInitialData, initialDataSize): taken as { u32 access_id @0; void*
-   data @8; u32 size @0x10 }, an assumption the log lines let the game's run confirm. The data: what the core reads of it */
+   data @8; u32 size @0x10 }, an assumption the log lines let the game's run confirm. A size over 0xD8 is
+   WrongApplicationAreaSize before the data's address is looked at; else the data is the size's bytes, NULL (InvalidArgument,
+   the core's) when they are not wholly in the guest window */
 typedef struct { uint32_t access_id; uint64_t data; uint32_t size; } CreateInfo;
 static uint32_t create_info(uint64_t a, CreateInfo *ci, const void **in) {
     const uint8_t *p = (const uint8_t *)guest(a, 0x14);
@@ -260,7 +337,8 @@ static uint32_t create_info(uint64_t a, CreateInfo *ci, const void **in) {
     memcpy(&ci->access_id, p, 4);
     memcpy(&ci->data, p + 8, 8);
     memcpy(&ci->size, p + 0x10, 4);
-    *in = guest(ci->data, ci->size < AMIIBO_AREA_SIZE ? ci->size : AMIIBO_AREA_SIZE);
+    if (ci->size > AMIIBO_AREA_SIZE) return AMIIBO_RC_WRONG_APPLICATION_AREA_SIZE;
+    *in = guest(ci->data, ci->size);
     return 0;
 }
 
@@ -272,7 +350,7 @@ HLE(_ZN2nn3nfp21CreateApplicationAreaERKNS0_12DeviceHandleERKNS0_25ApplicationAr
     if (!rc) rc = create_info(ARG(1), &ci, &in);
     else memset(&ci, 0, sizeof ci);
     if (!rc) rc = amiibo_create_area(ci.access_id, in, ci.size);
-    hos_log("[NFP] CreateApplicationArea(access %08x, data %#llx, size %#x) -> %#x", ci.access_id,
+    nfp_log("[NFP] CreateApplicationArea(access %08x, data %#llx, size %#x) -> %#x", ci.access_id,
             (unsigned long long)ci.data, ci.size, rc);
     RET(rc);
 }
@@ -285,7 +363,7 @@ HLE(_ZN2nn3nfp23RecreateApplicationAreaERKNS0_12DeviceHandleERKNS0_25Application
     if (!rc) rc = create_info(ARG(1), &ci, &in);
     else memset(&ci, 0, sizeof ci);
     if (!rc) rc = amiibo_recreate_area(ci.access_id, in, ci.size);
-    hos_log("[NFP] RecreateApplicationArea(access %08x, data %#llx, size %#x) -> %#x", ci.access_id,
+    nfp_log("[NFP] RecreateApplicationArea(access %08x, data %#llx, size %#x) -> %#x", ci.access_id,
             (unsigned long long)ci.data, ci.size, rc);
     RET(rc);
 }
@@ -302,7 +380,7 @@ static void nickname_and_owner(Ctx *c, const char *which) {
     const uint32_t info_rc = amiibo_register_info(buf);
     if (info_rc) memset(buf, 0, sizeof buf);
     if (out) memcpy(out, buf, sizeof buf);
-    hos_log("[NFP] StartNicknameAndOwnerSettings (%s): the applet answered closed, registered (RegisterInfo %#x) -> 0", which,
+    nfp_log("[NFP] StartNicknameAndOwnerSettings (%s): the applet answered closed, registered (RegisterInfo %#x) -> 0", which,
             info_rc);
     RET(0);
 }
@@ -318,13 +396,13 @@ HLE(_ZN2nn3nfp29StartNicknameAndOwnerSettingsEPNS0_12DeviceHandleEPbPNS0_12Regis
 /* StartGameDataEraser(DeviceHandle* out, AmiiboSettingsStartParam const&, TagInfo const&) */
 HLE(_ZN2nn3nfp19StartGameDataEraserEPNS0_12DeviceHandleERKNS0_24AmiiboSettingsStartParamERKNS0_7TagInfoE) {
     put_handle(ARG(0));
-    hos_log("[NFP] StartGameDataEraser: the applet answered closed, nothing erased -> 0");
+    nfp_log("[NFP] StartGameDataEraser: the applet answered closed, nothing erased -> 0");
     RET(0);
 }
 
 /* StartRestorer(DeviceHandle* out, AmiiboSettingsStartParam const&, TagInfo const&) */
 HLE(_ZN2nn3nfp13StartRestorerEPNS0_12DeviceHandleERKNS0_24AmiiboSettingsStartParamERKNS0_7TagInfoE) {
     put_handle(ARG(0));
-    hos_log("[NFP] StartRestorer: the applet answered closed, nothing restored -> 0");
+    nfp_log("[NFP] StartRestorer: the applet answered closed, nothing restored -> 0");
     RET(0);
 }

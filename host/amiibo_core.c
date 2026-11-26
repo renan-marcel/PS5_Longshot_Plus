@@ -9,7 +9,8 @@
    date beside it in state.txt. The tag's UUID is the figure's own (the first 7 bytes of FNV-1a-64 of its ID, little-endian),
    or random bytes on every GetTagInfo with the random tag ID on. Dates are fixed (2026-01-01): the core reads no clock.
 
-   One mutex guards it all; the event hooks are called with it held. */
+   One mutex guards it all. The event hooks are called after it is let go, in the order the call raised them, so a hook may
+   call back in (host/nn_nfp.c's signal a guest event; the menu's thread asks the state). */
 #include "amiibo_core.h"
 
 #include <stdio.h>
@@ -20,14 +21,14 @@
 #include <windows.h>
 static SRWLOCK mu = SRWLOCK_INIT;
 #define LOCK() AcquireSRWLockExclusive(&mu)
-#define UNLOCK() ReleaseSRWLockExclusive(&mu)
+#define UNLOCK_RAW() ReleaseSRWLockExclusive(&mu)
 #define MAKE_DIR(p) _mkdir(p)
 #else
 #include <pthread.h>
 #include <sys/stat.h>
 static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
 #define LOCK() pthread_mutex_lock(&mu)
-#define UNLOCK() pthread_mutex_unlock(&mu)
+#define UNLOCK_RAW() pthread_mutex_unlock(&mu)
 #define MAKE_DIR(p) mkdir(p, 0777)
 #endif
 
@@ -57,13 +58,32 @@ static int area_open;
 static uint32_t area_id;
 static uint8_t area[AMIIBO_AREA_SIZE];
 
-static void signal_ev(int ev) {
-    if (hook_signal) hook_signal(ev);
+/* the events a locked section raised, run once the mutex is let go (unlock): a hook may call back in */
+typedef struct {
+    int n;
+    struct { void (*hook)(int ev); int ev; } op[8];
+} Pending;
+static Pending pending;   /* (the locked section's: under the mutex) */
+
+static void raise_ev(void (*hook)(int ev), int ev) {
+    if (hook && pending.n < (int)(sizeof pending.op / sizeof pending.op[0])) {
+        pending.op[pending.n].hook = hook;
+        pending.op[pending.n].ev = ev;
+        pending.n++;
+    }
 }
 
-static void clear_ev(int ev) {
-    if (hook_clear) hook_clear(ev);
+static void signal_ev(int ev) { raise_ev(hook_signal, ev); }
+static void clear_ev(int ev) { raise_ev(hook_clear, ev); }
+
+/* the mutex let go, then the hooks the section raised, in order */
+static void unlock(void) {
+    const Pending run = pending;
+    pending.n = 0;
+    UNLOCK_RAW();
+    for (int i = 0; i < run.n; i++) run.op[i].hook(run.op[i].ev);
 }
+#define UNLOCK() unlock()
 
 static void put16(uint8_t *p, unsigned v) {
     p[0] = (uint8_t)v;

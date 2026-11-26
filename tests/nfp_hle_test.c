@@ -11,6 +11,13 @@
 
 uint8_t test_mem[TEST_MEM_SIZE];
 
+#ifdef NFP_FILE_LOG
+/* (the PS5's: host/ps5/win32_ps5.c gives the crash trace's file, whose folder's folder is the title folder) */
+#include <sys/stat.h>
+static char title[1024], trace_path[2048];
+const char *hos_ps5_trace_path(void) { return trace_path; }
+#endif
+
 /* ---- stand-ins: the host's log and nn_os_sync.c's system events */
 static char last_line[1024];
 static int lines, state_lines, bad_lines;
@@ -94,6 +101,11 @@ enum {
 int main(int argc, char **argv) {
     if (argc < 2) return 2;
     amiibo_set_dir(argv[1]);
+#ifdef NFP_FILE_LOG
+    snprintf(title, sizeof title, "%s/title", argv[1]);   /* (the title folder, without its logs/: nn_nfp.c makes it) */
+    mkdir(title, 0777);
+    snprintf(trace_path, sizeof trace_path, "%s/logs/crash_trace.txt", title);
+#endif
     amiibo_set_hooks(hos_nfp_signal, hos_nfp_clear, hos_nfp_random);
     p64(HANDLE, AMIIBO_DEVICE_HANDLE);
 
@@ -207,10 +219,15 @@ int main(int argc, char **argv) {
     p32(CREATE_INFO + 0x10, 0xD9);
     CHECK(CALL(23RecreateApplicationAreaERKNS0_12DeviceHandleERKNS0_25ApplicationAreaCreateInfoE, HANDLE, CREATE_INFO, 0, 0) ==
           AMIIBO_RC_WRONG_APPLICATION_AREA_SIZE, "RecreateApplicationArea, 0xD9 bytes: refused by size");
-    p64(CREATE_INFO + 8, TEST_MEM_SIZE - 0x10);   /* (data at the window's end: a size over 0xD8 still the size's error) */
+    p64(CREATE_INFO + 8, TEST_MEM_SIZE - 0x10);   /* (data at the window's end: a size over 0xD8 is still the size's error) */
     p32(CREATE_INFO + 0x10, 0x1000);
-    CHECK(CALL(23RecreateApplicationAreaERKNS0_12DeviceHandleERKNS0_25ApplicationAreaCreateInfoE, HANDLE, CREATE_INFO, 0, 0) !=
-          OK, "RecreateApplicationArea, out of the window: refused");
+    CHECK(CALL(23RecreateApplicationAreaERKNS0_12DeviceHandleERKNS0_25ApplicationAreaCreateInfoE, HANDLE, CREATE_INFO, 0, 0) ==
+          AMIIBO_RC_WRONG_APPLICATION_AREA_SIZE, "RecreateApplicationArea, 0x1000 bytes at the window's end: the size's error");
+    CHECK(CALL(21CreateApplicationAreaERKNS0_12DeviceHandleERKNS0_25ApplicationAreaCreateInfoE, HANDLE, CREATE_INFO, 0, 0) ==
+          AMIIBO_RC_WRONG_APPLICATION_AREA_SIZE, "CreateApplicationArea, 0x1000 bytes at the window's end: the size's error");
+    p32(CREATE_INFO + 0x10, 0x20);   /* (a size that fits, the data out of the window: InvalidArgument) */
+    CHECK(CALL(23RecreateApplicationAreaERKNS0_12DeviceHandleERKNS0_25ApplicationAreaCreateInfoE, HANDLE, CREATE_INFO, 0, 0) ==
+          AMIIBO_RC_INVALID_ARGUMENT, "RecreateApplicationArea, the data out of the window");
     CHECK(CALL(23RecreateApplicationAreaERKNS0_12DeviceHandleERKNS0_25ApplicationAreaCreateInfoE, HANDLE, 0, 0, 0) ==
           AMIIBO_RC_INVALID_ARGUMENT, "RecreateApplicationArea, no info");
 
@@ -232,6 +249,10 @@ int main(int argc, char **argv) {
     CHECK(CALL(18SetApplicationAreaERKNS0_12DeviceHandleEPKvm, HANDLE, DATA, 0xD8, 0) == OK, "SetApplicationArea");
     CHECK(CALL(18SetApplicationAreaERKNS0_12DeviceHandleEPKvm, HANDLE, DATA, 0xD9, 0) == AMIIBO_RC_WRONG_APPLICATION_AREA_SIZE,
           "SetApplicationArea, 0xD9 bytes");
+    CHECK(CALL(18SetApplicationAreaERKNS0_12DeviceHandleEPKvm, HANDLE, TEST_MEM_SIZE - 0x10, 0x1000, 0) ==
+          AMIIBO_RC_WRONG_APPLICATION_AREA_SIZE, "SetApplicationArea, 0x1000 bytes at the window's end: the size's error");
+    CHECK(CALL(18SetApplicationAreaERKNS0_12DeviceHandleEPKvm, HANDLE, 0, 0x1000, 0) == AMIIBO_RC_WRONG_APPLICATION_AREA_SIZE,
+          "SetApplicationArea, 0x1000 bytes, no data: the size's error");
     CHECK(CALL(5FlushERKNS0_12DeviceHandleE, HANDLE, 0, 0, 0) == OK, "Flush");
     CHECK(CALL(18GetApplicationAreaEPvPmRKNS0_12DeviceHandleEm, AREA, AREA_SIZE, HANDLE, 0xD8) == OK &&
           test_mem[AREA + 0xD7] == 0xD7, "the area read back");
@@ -241,25 +262,53 @@ int main(int argc, char **argv) {
     CHECK(f != NULL, "the area's file");
     if (f) fclose(f);
 
-    /* removed, stopped, finalized */
-    CHECK(CALL(13StopDetectionERKNS0_12DeviceHandleE, HANDLE, 0, 0, 0) == OK, "StopDetection");
-    CHECK(CALL(14GetDeviceStateERKNS0_12DeviceHandleE, HANDLE, 0, 0, 0) == AMIIBO_STATE_INITIALIZED, "Initialized again");
-    CHECK(CALL(8FinalizeEv, 0, 0, 0, 0) == OK, "Finalize");
-    CHECK(CALL(14GetDeviceStateERKNS0_12DeviceHandleE, HANDLE, 0, 0, 0) == AMIIBO_STATE_UNAVAILABLE, "Unavailable after Finalize");
-
-    /* the hooks: activate / deactivate have no guest event; the random bytes are filled */
+    /* the hooks: activate / deactivate have no guest event; the availability event is the guest's while attached */
     const int signals = ev_signals, clears = ev_clears;
     hos_nfp_signal(AMIIBO_EV_ACTIVATE);
     hos_nfp_clear(AMIIBO_EV_DEACTIVATE);
     CHECK(ev_signals == signals && ev_clears == clears, "no guest event for activate / deactivate");
     hos_nfp_clear(AMIIBO_EV_AVAILABILITY);
     CHECK(ev_clears == clears + 1 && ev_clear_key == EVENT, "the availability event cleared");
+
+    /* removed, stopped, finalized */
+    CHECK(CALL(13StopDetectionERKNS0_12DeviceHandleE, HANDLE, 0, 0, 0) == OK, "StopDetection");
+    CHECK(CALL(14GetDeviceStateERKNS0_12DeviceHandleE, HANDLE, 0, 0, 0) == AMIIBO_STATE_INITIALIZED, "Initialized again");
+    CHECK(CALL(8FinalizeEv, 0, 0, 0, 0) == OK, "Finalize");
+    CHECK(CALL(14GetDeviceStateERKNS0_12DeviceHandleE, HANDLE, 0, 0, 0) == AMIIBO_STATE_UNAVAILABLE, "Unavailable after Finalize");
+
+    /* after Finalize the game's event is its own again: nothing reaches the old key (the hooks, a switch of emulation) */
+    const int after_signals = ev_signals, after_clears = ev_clears;
+    hos_nfp_signal(AMIIBO_EV_AVAILABILITY);
+    hos_nfp_clear(AMIIBO_EV_AVAILABILITY);
+    CHECK(CALL(10InitializeEv, 0, 0, 0, 0) == OK, "Initialize again (no event attached)");
+    amiibo_config(0, 0, 1);
+    amiibo_config(1, 0, 1);
+    CHECK(ev_signals == after_signals && ev_clears == after_clears, "no signal or clear reaches the old event after Finalize");
+    CHECK(CALL(8FinalizeEv, 0, 0, 0, 0) == OK, "Finalize again");
     uint8_t r1[16] = {0}, r2[16] = {0};
     hos_nfp_random(r1, sizeof r1);
     hos_nfp_random(r2, sizeof r2);
     CHECK(memcmp(r1, r2, sizeof r1) != 0, "random bytes");
 
     CHECK(lines > 20 && bad_lines == 0, "every log line starts with [NFP]");
+#ifdef NFP_FILE_LOG
+    /* (the PS5's file, here with NFP_FILE_CAP 1024: the lines up to the cap, then one saying it is full, nothing after) */
+    char text[8192];
+    snprintf(path, sizeof path, "%s/logs/nfp.txt", title);
+    f = fopen(path, "rb");
+    size_t got = 0;
+    if (f) got = fread(text, 1, sizeof text - 1, f), fclose(f);
+    text[got] = 0;
+    CHECK(f != NULL, "logs/nfp.txt made, with its logs/ folder");
+    CHECK(!strncmp(text, "[NFP] ListDevices(max 4) -> 0xa073", 34), "nfp.txt starts with the first call's line");
+    CHECK(got >= 1024 && got < 1024 + 600, "nfp.txt stops at its cap");
+    const char *full = strstr(text, "is full");
+    const char *full_end = full ? strchr(full, '\n') : NULL;
+    CHECK(full_end && !full_end[1] && !strstr(text, "Finalize"), "one last line says it is full, none after");
+    int file_lines = 0;
+    for (const char *q = text; *q; q++) file_lines += *q == '\n';
+    CHECK(file_lines > 5 && file_lines < lines, "nfp.txt has the first lines");
+#endif
     if (failures) {
         printf("%d failure(s); last log line: %s\n", failures, last_line);
         return 1;

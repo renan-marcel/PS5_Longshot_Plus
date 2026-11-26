@@ -10,11 +10,13 @@
   GetNpadId writes 0, Create/RecreateApplicationArea read {access id @0, data @8, size @0x10} and a size over 0xD8 is
   refused, the settings applet calls return 0 with the handle written (and registered = true and the figure's
   RegisterInfo for StartNicknameAndOwnerSettings), the availability event is the guest's (init, signalled by the core),
-  a null guest pointer is never written through, and every log line starts with [NFP].
+  a null guest pointer is never written through, every log line starts with [NFP], and (not on Windows) the PS5's copy of
+  them, <title folder>/logs/nfp.txt, is made with its folder and stops at its cap with one line saying so.
 
     python -I -B tests/test_nfp_hle_names.py [--cc gcc]
 """
 import argparse
+import os
 from pathlib import Path
 import re
 import shutil
@@ -72,6 +74,8 @@ def check_names(src):
 
 def compile_test(cc, work, exe, sanitize):
     flags = ["-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-g"] if sanitize else ["-g"]
+    if os.name != "nt":   # (the PS5's logs/nfp.txt writer, POSIX like the PS5's C library; its cap small enough to reach)
+        flags += ["-DNFP_FILE_LOG", "-DNFP_FILE_CAP=1024"]
     return subprocess.run([cc, "-std=c11", "-Wall", "-Wextra", "-Werror"] + flags +
                           [str(ROOT / "tests" / "nfp_hle_test.c"), str(work / "nn_nfp.c"), str(work / "amiibo_core.c"),
                            "-I", str(work), "-o", str(exe)], capture_output=True, text=True)

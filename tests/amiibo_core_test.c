@@ -270,6 +270,35 @@ static void no_dir(void) {
     CHECK(amiibo_device_state() == AMIIBO_STATE_INITIALIZED);
 }
 
+/* The hooks call back into the core (host/nn_nfp.c's signal a guest event, the menu's thread asks the state): they run after
+   the core's mutex is let go, so this neither deadlocks nor sees a half-made change. */
+static int seen_state[3] = {-9, -9, -9}, reentered;
+static void reenter_signal(int ev) {
+    if (ev >= 0 && ev < 3) seen_state[ev] = amiibo_device_state();
+    reentered++;
+}
+static void reenter_clear(int ev) {
+    (void)ev;
+    (void)amiibo_device_state();
+    reentered++;
+}
+static void hooks_reenter(void) {
+    amiibo_set_hooks(reenter_signal, reenter_clear, on_random);
+    amiibo_set_dir(dir);
+    RC(amiibo_initialize(), 0);
+    amiibo_config(0, 0, 1);   /* (emulation off and on: the availability event, twice) */
+    amiibo_config(1, 0, 1);
+    CHECK(seen_state[AMIIBO_EV_AVAILABILITY] == AMIIBO_STATE_INITIALIZED);
+    amiibo_select(&LINK);
+    RC(amiibo_start_detection(), 0);   /* (auto-touch: activate signalled, deactivate cleared) */
+    CHECK(seen_state[AMIIBO_EV_ACTIVATE] == AMIIBO_STATE_TAG_FOUND);
+    amiibo_select(&EPONA);   /* (another figure: the one on the reader removed, deactivate signalled) */
+    CHECK(seen_state[AMIIBO_EV_DEACTIVATE] == AMIIBO_STATE_TAG_REMOVED);
+    RC(amiibo_finalize(), 0);
+    CHECK(reentered >= 6);
+    amiibo_set_hooks(on_signal, on_clear, on_random);
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         printf("usage: amiibo_core_test <dir>\n");
@@ -284,6 +313,7 @@ int main(int argc, char **argv) {
     if (!failed) auto_touch();
     if (!failed) emulation_off();
     if (!failed) no_dir();
+    if (!failed) hooks_reenter();
     if (failed) return 1;
     printf("PASS\n");
     return 0;

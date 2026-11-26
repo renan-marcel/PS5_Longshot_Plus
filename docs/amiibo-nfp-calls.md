@@ -48,4 +48,5 @@ applet. The host answers each as "the applet closed, nothing changed" and logs t
 - There is no `GetApplicationAreaSize`: the game passes its own size to `GetApplicationArea`.
 - There is no `Restore`.
 - Which of these the game calls while playing is not yet known: the stubs log to stderr, which the PS5 does not keep, so
-  the "called in game" column is filled from the `[NFP]` log lines the host answers add.
+  the "called in game" column is filled from the `[NFP]` log lines the host answers add. On the PS5 they are also written
+  to `logs/nfp.txt` in the title folder (up to 1 MB a run); on the PC they are in `logs/longshot_log.txt`.
