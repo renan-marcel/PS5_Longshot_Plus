@@ -166,12 +166,6 @@ static int log_take_locked(char **out) {
 static void log_write(char **lines, int n) {
     size_t total = 0;
     for (int i = 0; i < n; i++) total += strlen(lines[i]);
-#ifdef __PROSPERO__
-    {   /* (the console keeps no log file: its last 64 KB for a break's report, host/ps5/ps5_bug_report.c) */
-        void hos_ps5_log_keep(const char *s, size_t n);
-        for (int i = 0; i < n; i++) hos_ps5_log_keep(lines[i], strlen(lines[i]));
-    }
-#endif
     char *all = n > 1 ? (char *)malloc(total + 1) : NULL;
     if (all) {
         size_t at = 0;
@@ -321,6 +315,9 @@ static const char *log_level_tag(int level) {
     }
 }
 
+#ifdef __PROSPERO__
+void hos_ps5_log_keep(const char *s, size_t n);   /* (host/ps5/ps5_bug_report.c) */
+#endif
 static void hos_vlog(int level, const char *fmt, va_list ap) {
     char buf[1024], line[1100];
     vsnprintf(buf, sizeof buf, fmt, ap);
@@ -334,6 +331,10 @@ static void hos_vlog(int level, const char *fmt, va_list ap) {
         void hos_control_log(const char *line);
         hos_control_log(line);
     }
+#ifdef __PROSPERO__
+    hos_ps5_log_keep(line, strlen(line));   /* (the console keeps no log file and has no log thread: its last 64 KB for a break's
+                                               report, host/ps5/ps5_bug_report.c; from any thread) */
+#endif
     if (log_queue(line)) return;
     fputs(line, stderr);
     fflush(stderr);

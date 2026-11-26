@@ -24,13 +24,26 @@
 static char keep_ring[KEEP_CAP];
 static size_t keep_total;   /* (bytes ever kept: the ring's next byte is keep_total % KEEP_CAP) */
 
-void hos_ps5_log_keep(const char *s, size_t n) {   /* (the log's own thread only: one writer) */
+/* (every thread that logs keeps its lines: host/hos_thread.c hos_vlog. A spin lock, held for one short copy, so lines stay whole;
+   the report's reader, which may run in a signal handler on a thread that holds it, tries it a while and reads anyway) */
+static int keep_lock;
+static int keep_try(long spins) {
+    for (long i = 0; spins < 0 || i < spins; i++)
+        if (!__atomic_exchange_n(&keep_lock, 1, __ATOMIC_ACQUIRE)) return 1;
+    return 0;
+}
+static void keep_unlock(void) { __atomic_store_n(&keep_lock, 0, __ATOMIC_RELEASE); }
+
+void hos_ps5_log_keep(const char *s, size_t n) {
     if (!s) return;
     if (n >= KEEP_CAP) s += n - KEEP_CAP, n = KEEP_CAP;
-    const size_t at = keep_total % KEEP_CAP, first = n < KEEP_CAP - at ? n : KEEP_CAP - at;
+    keep_try(-1);
+    const size_t total = __atomic_load_n(&keep_total, __ATOMIC_RELAXED);
+    const size_t at = total % KEEP_CAP, first = n < KEEP_CAP - at ? n : KEEP_CAP - at;
     memcpy(keep_ring + at, s, first);
     memcpy(keep_ring, s + first, n - first);
-    __atomic_store_n(&keep_total, keep_total + n, __ATOMIC_RELEASE);
+    __atomic_store_n(&keep_total, total + n, __ATOMIC_RELEASE);
+    keep_unlock();
 }
 
 static int write_all(int fd, const char *p, size_t n) {
@@ -108,10 +121,12 @@ int hos_ps5_bug_report_write(const char *title_dir, const char *kind, const char
     put_file(dir, "report.txt", text, n < 0 ? 0 : (size_t)n < sizeof text ? (size_t)n : sizeof text - 1);
 
     /* the log's last bytes, oldest first, from the start of a line */
+    const int locked = keep_try(1000000);   /* (not held for good: a thread stopped inside keep, the bytes are read as they are) */
     const size_t total = __atomic_load_n(&keep_total, __ATOMIC_ACQUIRE);
     const size_t have = total < KEEP_CAP ? total : KEEP_CAP, start = total < KEEP_CAP ? 0 : total % KEEP_CAP;
     static char log[KEEP_CAP];
     for (size_t i = 0; i < have; i++) log[i] = keep_ring[(start + i) % KEEP_CAP];
+    if (locked) keep_unlock();
     size_t from = 0;
     if (total > KEEP_CAP)
         while (from < have && log[from++] != '\n') {}
