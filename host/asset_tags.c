@@ -27,6 +27,12 @@ static uint32_t name_id(const char *path) {   /* (mu held) 0 when the table is f
     const char *rel = path;
     for (const char *p = path; *p; p++)
         if ((p[0] == 'r' || p[0] == 'R') && !strncmp(p + 1, "omfs", 4) && (p[5] == '/' || p[5] == '\\')) rel = p + 6;
+    if (rel == path) {   /* (the game's own path, host/nn_fs.c's: its mount name first, "rom:/Model/...") */
+        const char *colon = strchr(path, ':');
+        if (colon && colon > path + 1 && !memchr(path, '/', (size_t)(colon - path)) && !memchr(path, '\\', (size_t)(colon - path)))
+            rel = colon + 1;
+    }
+    while (*rel == '/' || *rel == '\\') rel++;
     char norm[NAME_LEN];
     size_t n = 0;
     for (; rel[n] && n + 1 < NAME_LEN; n++) norm[n] = rel[n] == '\\' ? '/' : rel[n];
