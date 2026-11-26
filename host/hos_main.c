@@ -663,6 +663,38 @@ void hos_oot_cct_speed(Ctx *c, uint64_t controller, int per_second) {
     memcpy(&c->vreg[0][0], &speed, sizeof speed);
 }
 
+#if defined(_WIN32) || defined(__linux__) || defined(__PROSPERO__)   /* (the debug tools, and the PS5's scene poll) */
+#define OOT_GAMEDATA_SLOT 0x84c9e180ULL   /* GameDataMgr, as ReserveBancChange's readers load it */
+static uint64_t oot_singleton(Ctx *c, uint64_t slot) {
+    const uint64_t holder = recomp_load64(c, slot);
+    return holder ? recomp_load64(c, holder) : 0;
+}
+
+/* GameDataMgr's String64 getter by MurMur3 name hash: f_80cd0ea0. 1 when found. */
+static int oot_gamedata_string(Ctx *c, uint32_t hash, char *buf, size_t size) {
+    const uint64_t mgr = oot_singleton(c, OOT_GAMEDATA_SLOT);
+    A64Fn get = a64_lookup(0x80cd0ea0ULL);
+    buf[0] = 0;
+    if (!mgr || !get) return 0;
+    const Ctx saved = *c;
+    const uint64_t out = (c->x[31] - 0x40) & ~0xfULL;
+    recomp_store64_sp(c, out, 0);
+    c->x[31] = out;
+    c->x[0] = mgr, c->x[1] = out, c->x[2] = hash;
+    get(c);
+    const int found = (int)(c->x[0] & 1);
+    const uint64_t text = recomp_load64(c, out);
+    *c = saved;
+    if (!found || !text) return 0;
+    for (size_t i = 0; i + 1 < size; i++) {
+        buf[i] = (char)recomp_load8(c, text + i);
+        buf[i + 1] = 0;
+        if (!buf[i]) break;
+    }
+    return 1;
+}
+#endif
+
 #if defined(_WIN32) || defined(__linux__)   /* (the debug tools: host/posix has what they call) */
 /* OneShotAddOrRemovePouchContent (f_828d4a70) for one pouch content by actor name: delta > 0 adds, < 0 removes.
    Returns the event status (top bits of the result word), or -1 when the pouch is not ready. */
@@ -982,14 +1014,8 @@ static const OotDestination oot_destinations[] = {   /* (generated: work/oot-tel
 };
 #define OOT_AGE_ACTION 999   /* (the Cheats page's Age row) */
 #define OOT_TELEPORT_ACTION 1000   /* (pouch edits use 200 to 348) */
-#define OOT_GAMEDATA_SLOT 0x84c9e180ULL   /* GameDataMgr, as ReserveBancChange's readers load it */
 #define OOT_EVENTMGR_SLOT 0x84c9e090ULL   /* EventMgr, as SeqOneShotRequestEvent loads it */
 #define OOT_EVENT_ARG_SIZE 0x1b20ULL      /* EventRequestArg: SeqOneShotRequestEvent reserves this much stack */
-
-static uint64_t oot_singleton(Ctx *c, uint64_t slot) {
-    const uint64_t holder = recomp_load64(c, slot);
-    return holder ? recomp_load64(c, holder) : 0;
-}
 
 /* GameDataMgr getters by MurMur3 name hash: f_8022d9c0 (bool) and f_80cd0ea0 (String64). 1 when found. */
 static int oot_gamedata_bool(Ctx *c, uint32_t hash, int *value) {
@@ -1008,28 +1034,6 @@ static int oot_gamedata_bool(Ctx *c, uint32_t hash, int *value) {
     return found;
 }
 
-static int oot_gamedata_string(Ctx *c, uint32_t hash, char *buf, size_t size) {
-    const uint64_t mgr = oot_singleton(c, OOT_GAMEDATA_SLOT);
-    A64Fn get = a64_lookup(0x80cd0ea0ULL);
-    buf[0] = 0;
-    if (!mgr || !get) return 0;
-    const Ctx saved = *c;
-    const uint64_t out = (c->x[31] - 0x40) & ~0xfULL;
-    recomp_store64_sp(c, out, 0);
-    c->x[31] = out;
-    c->x[0] = mgr, c->x[1] = out, c->x[2] = hash;
-    get(c);
-    const int found = (int)(c->x[0] & 1);
-    const uint64_t text = recomp_load64(c, out);
-    *c = saved;
-    if (!found || !text) return 0;
-    for (size_t i = 0; i + 1 < size; i++) {
-        buf[i] = (char)recomp_load8(c, text + i);
-        buf[i + 1] = 0;
-        if (!buf[i]) break;
-    }
-    return 1;
-}
 
 /* One argument of an EventRequestArg: the array of 200-byte entries at arg+8, capacity arg+0, count arg+16.
    Entry: +0 type (1 string pointer, 4 bool), +8 name buffer, +16 its capacity, +152 the value. As
@@ -1693,6 +1697,29 @@ int hos_oot_opening(Ctx *c, int mode) {
     return 0;
 }
 
+#ifdef __PROSPERO__
+#include "scene_poll.h"
+#include <time.h>
+/* (PS5) the scene the game is in, for the prefetch, the zone and a break's report (host/ps5/asset_prefetch.c): read from
+   GameDataMgr's Sequence_CurrentBanc at most every 500 ms on the player's update, as the debug tools read it on the PC.
+   One thread at a time; the others go on. */
+static void hos_ps5_scene_poll(Ctx *c) {
+    static ScenePoll poll = SCENE_POLL_INIT;
+    static int busy;
+    if (__atomic_exchange_n(&busy, 1, __ATOMIC_ACQUIRE)) return;
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    const uint64_t now_ms = (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+    char map[128];
+    if (scene_poll_due(&poll, now_ms) && oot_gamedata_string(c, 0x1d6189dau, map, sizeof map) &&   /* Sequence_CurrentBanc */
+        scene_poll_changed(&poll, map)) {
+        void asset_prefetch_scene(const char *scene);
+        asset_prefetch_scene(map);
+        hos_log("map: %s", map);
+    }
+    __atomic_store_n(&busy, 0, __ATOMIC_RELEASE);
+}
+#endif
 void hos_oot_lift_player(Ctx *c, uint64_t actor) {
 #if defined(_WIN32) || defined(__linux__)   /* (the debug tools: host/posix has what they call) */
     flight_pose_actor = 0;
@@ -1711,7 +1738,11 @@ void hos_oot_lift_player(Ctx *c, uint64_t actor) {
     hos_oot_state_tap(actor);
     ReleaseSRWLockExclusive(&cheats_lock);
 #else
+#ifdef __PROSPERO__
+    hos_ps5_scene_poll(c);
+#else
     (void)c;
+#endif
     (void)actor;
 #endif
 }

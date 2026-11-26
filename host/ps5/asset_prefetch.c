@@ -620,8 +620,11 @@ void asset_prefetch_disk(int fd, uint64_t base, uint32_t bytes, double ms) {
     pthread_mutex_unlock(&mu);
 }
 
-/* The game's current scene as last told (a break's report: host/ps5/ps5_bug_report.c); "" before the first */
-const char *asset_prefetch_scene_now(void) { return scene_now; }
+/* The game's current scene as last told (a break's report: host/ps5/ps5_bug_report.c); before the first, the one whose
+   parameters were last opened (its load); "" before either */
+const char *asset_prefetch_scene_now(void) {
+    return scene_now[0] ? scene_now : scene_loading;
+}
 
 void asset_prefetch_stats(AssetPrefetchStats *out) {
     pthread_mutex_lock(&mu);
