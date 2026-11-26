@@ -22,6 +22,11 @@ bool begin(uint32_t w, uint32_t h);
 const Fonts& fonts();
 /// The start-up screen's logo (assets/longshot.png), or null; its width over its height in *aspect
 ImTextureData* logo(float* aspect);
+/// (longshot) A picture of w x h RGBA8 pixels (copied) as a texture the menu draws with, registered with ImGui as the logo is;
+/// null before ImGui is ready. Made inside a frame (between begin and record)
+ImTextureData* picture_make(const uint8_t* rgba, int w, int h);
+/// Lets a picture_make texture go: no longer drawn from now on, destroyed once the frames that drew it are done, then freed
+void picture_drop(ImTextureData* tex);
 /// The frame's drawing over the window's image `index` (TRANSFER_DST_OPTIMAL before and after): new glyphs and textures
 /// copied in on cmd first (no wait on the queue), then one render pass
 void record(VkCommandBuffer cmd, uint32_t index, uint32_t w, uint32_t h);
