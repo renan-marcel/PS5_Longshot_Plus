@@ -3371,6 +3371,8 @@ bool sparse_bind_infos(std::vector<VkSparseBufferMemoryBindInfo>& infos, uint64_
     return res == VK_SUCCESS;
 }
 } // namespace
+/// (longshot, PS5's logs/memory.txt: vk_vma.cpp rx_vk_memory_stats) the mirrors' VRAM now
+uint64_t mirror_bytes_now() { return __atomic_load_n(&mirror_bytes, __ATOMIC_RELAXED); }
 /// (longshot, RX_VK_MIRROR_SPARSE) The wait a submission of recordings takes for the sparse mirrors' binds before it, on the
 /// GPU; false: none yet (dev.present_mu held, as the binds are made)
 bool memory_sparse_wait(VkSemaphoreSubmitInfo* w) {

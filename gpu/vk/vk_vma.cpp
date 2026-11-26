@@ -510,3 +510,25 @@ bool system_heap_usage(uint64_t* used, uint64_t* budget) {
 }
 
 } // namespace mkwvk
+
+#ifdef __PROSPERO__
+#include "vk_texture.h"   // (texture_count, texture_bytes)
+namespace mkwvk {
+uint64_t mirror_bytes_now();   // (vk_memory.cpp: the mirrors' VRAM)
+}
+/// (PS5, host/ps5/win32_ps5.c's logs/memory.txt) the renderer's own memory: its VMA blocks and what they hold (every heap),
+/// textures (count, bytes) and mirrors, as one key=value run. Read from the watch thread with no lock: the counts are a
+/// moment's, which a log line is
+extern "C" void rx_vk_memory_stats(char* out, size_t n) {
+    using namespace mkwvk;
+    uint64_t blocks = 0, allocs = 0;
+    if (vma) {
+        VmaBudget b[VK_MAX_MEMORY_HEAPS]{};
+        vmaGetHeapBudgets(vma, b);
+        for (uint32_t h = 0; h < dev.memory.memoryHeapCount; h++) blocks += b[h].statistics.blockBytes, allocs += b[h].statistics.allocationBytes;
+    }
+    snprintf(out, n, "vma_block_mb=%llu vma_alloc_mb=%llu tex_n=%llu tex_mb=%llu mirror_mb=%llu", (unsigned long long)(blocks >> 20),
+             (unsigned long long)(allocs >> 20), (unsigned long long)texture_count(), (unsigned long long)(texture_bytes() >> 20),
+             (unsigned long long)(mirror_bytes_now() >> 20));
+}
+#endif

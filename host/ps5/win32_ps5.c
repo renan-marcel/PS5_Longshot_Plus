@@ -1300,6 +1300,35 @@ static void ps5_crash_sig_handler(int sig) {
 }
 
 void hos_log(const char *fmt, ...);   /* (host/hos_thread.c: the log, kept for a break's report) */
+
+/* (longshot) logs/memory.txt (host/ps5/memory_line.h): the console's memory and the renderer's at each zone change, 5 s after
+   it, every minute and just before a floor exit, written from this watch thread */
+#include "memory_line.h"
+#include "ps5_logfile.h"
+#include "asset_prefetch.h"
+static int mem_zone_changed;
+static void mem_on_zone(const char *old_zone, const char *new_zone) {   /* (the prefetch's zone change: host/ps5/asset_prefetch.c) */
+    (void)old_zone, (void)new_zone;
+    __atomic_store_n(&mem_zone_changed, 1, __ATOMIC_RELEASE);
+}
+static void mem_write(const char *why, uint64_t room, uint64_t started_ms) {
+    int64_t at = 0;
+    size_t largest = 0;
+    sceKernelAvailableDirectMemorySize(0, sceKernelGetDirectMemorySize(), 0x10000, &at, &largest);
+    AssetPrefetchStats ps;
+    memset(&ps, 0, sizeof ps);
+    asset_prefetch_stats(&ps);
+    char renderer[512] = "";
+    extern void rx_vk_memory_stats(char *out, size_t n) __attribute__((weak));
+    if (rx_vk_memory_stats) rx_vk_memory_stats(renderer, sizeof renderer);
+    const uint64_t now = zone_now_ms();
+    char line[1024];
+    memory_line(line, sizeof line, (double)(now - started_ms) / 1000.0, why, asset_prefetch_scene_now(), asset_prefetch_zone_now(),
+                room >> 20, (uint64_t)largest >> 20, __atomic_load_n(&committed_bytes, __ATOMIC_RELAXED) >> 20, ps.held_bytes >> 20,
+                __atomic_load_n(&g_zone_boost_until_ms, __ATOMIC_RELAXED) > now, renderer);
+    hos_ps5_logfile("memory.txt", line);
+}
+
 static void *memory_floor_watch(void *unused) {
     (void)unused;
     const uint64_t floor = floor_bytes();
@@ -1312,9 +1341,15 @@ static void *memory_floor_watch(void *unused) {
     uint64_t last_progress_ms = zone_now_ms();
     int hang_logged = 0;
     ps5_write_crash_trace("BOOT_WATCHDOG_ACTIVE", 0);
+    MemSched sched = MEM_SCHED_INIT;
+    const uint64_t started_ms = zone_now_ms();
     for (;;) {
         uint64_t pieces = 0;
         const uint64_t room = direct_room_now(&pieces);
+        {   /* (logs/memory.txt, on its schedule) */
+            const char *why = mem_sched_due(&sched, zone_now_ms(), __atomic_exchange_n(&mem_zone_changed, 0, __ATOMIC_ACQ_REL));
+            if (why) mem_write(why, room, started_ms);
+        }
         if (room < (1ull << 30) && room >> 28 < low >> 28)
             hos_log("[ps5] memory floor: %llu MiB of direct memory free in %llu pieces (the title closes under %llu)",
                     (unsigned long long)(room >> 20), (unsigned long long)pieces, (unsigned long long)(floor >> 20));
@@ -1371,6 +1406,7 @@ static void *memory_floor_watch(void *unused) {
                     notify_player("Longshot ran out of memory and was closed to keep the console safe. Lower the resolution or "
                                   "turn off frame generation in the menu, then load your last save.");
             }
+            mem_write("floor", room, started_ms);
             hos_ps5_exit(3);
         }
         sceKernelUsleep(room < floor + (1600ull << 20) ? 15000 : 150000);
@@ -1379,6 +1415,7 @@ static void *memory_floor_watch(void *unused) {
 }
 /* (host/hos_main.c: after longshot_env.txt is read, which may set the floor) */
 void hos_ps5_memory_floor_start(void) {
+    asset_prefetch_on_zone(mem_on_zone);
     if (!floor_bytes()) {
         fprintf(stderr, "[ps5] memory floor: off (HOS_PS5_MEM_FLOOR_MB=0)\n");
         return;
