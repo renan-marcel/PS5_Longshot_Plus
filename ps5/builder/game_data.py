@@ -347,6 +347,18 @@ def from_nup(nup, path, app, stamp):
     return stage
 
 
+def prefetch_map(app):
+    """Data.deps beside the packs (ps5/builder/asset_deps.py): what each scene will read, for the game to read it ahead
+    (host/ps5/asset_prefetch.c). Optional: the game plays the same without it, so a failure here is said and left out"""
+    import asset_deps
+    try:
+        asset_deps.ensure(app)
+    except Exception as exc:   # (any: the title folder is whole without it)
+        say("prefetch map: not made (%s: %s); the game reads every file when it asks, as before" % (type(exc).__name__, exc))
+        with suppress(FileNotFoundError):
+            os.remove(os.path.join(app, asset_deps.DEPS_NAME))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--src", required=True, help="the folder with nx2/ (the kit's src)")
@@ -367,6 +379,8 @@ def main():
         os.path.isdir(os.path.join(a.app, DATA)) and not os.path.exists(os.path.join(a.app, data_packs.INDEX_NAME)))
     if read_text(mark) == stamp and whole:
         say("the game's data is there already, from this game file")
+        if not a.folder:
+            prefetch_map(a.app)
         return 0
     with suppress(FileNotFoundError):   # (removed first: the data is whole only once it is written again)
         os.remove(mark)
@@ -383,6 +397,8 @@ def main():
         finally:
             source.close()
     write_text(mark, stamp)
+    if not a.folder:
+        prefetch_map(a.app)
     if stage:
         remove_tree(nup, stage)
     say("game data: %s" % os.path.join(a.app, DATA))

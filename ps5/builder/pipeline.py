@@ -50,6 +50,8 @@ MODELS = {
             "RX_VK_EXACT_STALE": "1",
             "HOS_PS5_RENDER_MB": "2560",
             "HOS_PS5_TEX_RESERVE_MB": "1800",
+            # (the title closes itself under 400 MiB free, not 220: a base console's kernel panicked at 1024 textures)
+            "HOS_PS5_MEM_FLOOR_MB": "400",
             "RX_VK_EVICT_MIN_UNUSED": "30",
         },
     },

@@ -832,6 +832,9 @@ const char* hn_ultrawide(int v, int variant) {
     return r > game * 1.01 ? t[2] : r < game * 0.99 ? t[3] : t[1];
 }
 /// Anisotropic filtering: the game's own, or 2x to 16x (vk_draw.cpp aniso_override)
+// (longshot, PS5) the Texture size and Memory margin rows (vk_texture.cpp, vk_vma.cpp)
+const char* tx_ps5_textures(int v) { return v == 1 ? "512 (safest)" : v == 2 ? "1024 (sharpest)" : "Auto (by free memory)"; }
+const char* tx_ps5_memory(int v) { return v == 1 ? "Safe" : v == 2 ? "Performance" : "Standard"; }
 const char* tx_anisotropy(int v) {
     static const char* t[] = {"Game's", "2x", "4x", "8x", "16x"};
     return (unsigned)v < 5 ? t[v] : t[4];
@@ -1588,6 +1591,15 @@ Row rows[] = {
      hn_shadow_res},
     // (the rows to change when something is wrong, or on a card short of memory: last)
     {TAB_GRAPHICS, "GPU and memory", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, false, true, -1, true},
+    // (longshot, PS5 only: row_shown) the console's one memory, between the game, the renderer and its textures
+    {TAB_GRAPHICS, "Texture size", &opts.ps5_textures, 0, 2, 1, tx_ps5_textures,
+     "How wide the game's largest textures are kept. Auto: 1024 while the console has memory to spare, 512 when it does not. "
+     "512: always, the safest in crowded places such as Castle Town. 1024: always, the sharpest; on a PS5 or PS5 Slim it may "
+     "close the game where memory runs short, so a PS5 or PS5 Slim stays at 512. For textures made from now on.", nullptr, false, true},
+    {TAB_GRAPHICS, "Memory margin", &opts.ps5_memory, 0, 2, 1, tx_ps5_memory,
+     "How the console's memory is shared. Standard: as measured for this console. Safe: more kept for the game (400 MB), "
+     "for a game that closes for want of memory; textures give way sooner. Performance: more for the textures and the "
+     "renderer (150-256 MB), PS5 Pro only (a PS5 or PS5 Slim keeps Standard's). Applies at once.", nullptr, false, true},
     {TAB_GRAPHICS, "GPU device", &opts.gpu_device, 0, 8, 1, tx_gpu,
      "Which graphics card the game runs on. Applies after a restart.", hn_gpu, true, true},
     // (longshot, threaded_rendering.h: the render thread and the recorder thread together, one row. Auto, On, Off as V-Sync's,
@@ -2113,7 +2125,12 @@ bool row_shown(int i) {
            (v != &opts.dlss || ur::upscaler_shown(upscalers_available())) &&
            (v != &opts.dlss_model || ur::model_shown(dlss_why() == DLSS_OK)) &&
            ((v != &opts.hdr_white && v != &opts.hdr_peak && v != &opts.hdr_contrast) || opts.hdr != 0) &&
-           (v != &opts.hdr_tonemap || opts.hdr == 2);
+           (v != &opts.hdr_tonemap || opts.hdr == 2) &&
+#ifdef __PROSPERO__
+           true;
+#else
+           v != &opts.ps5_textures && v != &opts.ps5_memory;   // (the PS5's memory rows: the console's only)
+#endif
 }
 int tab_row_count(int t) {
     int c = 0;

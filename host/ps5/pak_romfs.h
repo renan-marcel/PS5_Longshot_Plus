@@ -19,6 +19,9 @@ extern "C" {
    pak_romfs_error says why. */
 int pak_romfs_open(const char *index_path, const char *packs_dir);
 const char *pak_romfs_error(void);
+/* The packs' build id (16 bytes, Data.idx's), or NULL before they are open: what Data.deps must name
+   (host/ps5/asset_prefetch.c). */
+const uint8_t *pak_romfs_build_id(void);
 /* Whether a path is under PAK_ROMFS_ROOT (and the packs are open). */
 int pak_romfs_path(const char *path);
 /* The node of a path (a folder or a file): >= 0 with *is_dir and *size set; -1 when there is none. */

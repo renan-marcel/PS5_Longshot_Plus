@@ -759,6 +759,10 @@ static void oot_inventory_refresh(Ctx *c, int64_t now) {
                      oot_gamedata_bool(c, 0xcea220d3u, &child) ? (child ? "child" : "adult") : "age not known");
             if (strcmp(line, logged)) hos_log("map: %s", line), snprintf(logged, sizeof logged, "%s", line);
             oot_first_night_fix(c, map);
+#ifdef __PROSPERO__
+            void asset_prefetch_scene(const char *scene);
+            asset_prefetch_scene(map);   /* (host/ps5/asset_prefetch.c: what the next scenes will read, ahead) */
+#endif
         }
     }
     if (!probed && oot_pouch_count(c, "Item_DekuSeed") >= 0) {
@@ -2044,6 +2048,8 @@ static int game_main(int argc, char **argv) {
                     const char *pak_romfs_error(void);
                     if (GetFileAttributesA(beside_index) != INVALID_FILE_ATTRIBUTES && pak_romfs_open(beside_index, beside_data)) {
                         hos_romfs_dir = "/pak/romfs";   /* (PAK_ROMFS_ROOT) */
+                        void asset_prefetch_init(const char *title_dir);
+                        asset_prefetch_init(dir);   /* (Data.deps beside: reading ahead, docs/ps5-asset-prefetch.md) */
                     } else if (GetFileAttributesA(beside_index) != INVALID_FILE_ATTRIBUTES) {
                         fprintf(stderr, "[ps5] game data: the packs cannot be read: %s\n", pak_romfs_error());
                     } else if (data_at != INVALID_FILE_ATTRIBUTES && (data_at & FILE_ATTRIBUTE_DIRECTORY)) {

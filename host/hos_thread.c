@@ -166,6 +166,12 @@ static int log_take_locked(char **out) {
 static void log_write(char **lines, int n) {
     size_t total = 0;
     for (int i = 0; i < n; i++) total += strlen(lines[i]);
+#ifdef __PROSPERO__
+    {   /* (the console keeps no log file: its last 64 KB for a break's report, host/ps5/ps5_bug_report.c) */
+        void hos_ps5_log_keep(const char *s, size_t n);
+        for (int i = 0; i < n; i++) hos_ps5_log_keep(lines[i], strlen(lines[i]));
+    }
+#endif
     char *all = n > 1 ? (char *)malloc(total + 1) : NULL;
     if (all) {
         size_t at = 0;
@@ -356,6 +362,12 @@ void hos_fatal(Ctx *c, const char *fmt, ...) {
     vsnprintf(buf, sizeof buf, fmt, ap);
     va_end(ap);
     log_flush();
+#ifdef __PROSPERO__
+    {   /* (the break's report in bug-reports/: host/ps5/ps5_bug_report.c) */
+        void hos_ps5_bug_report(const char *kind, const char *reason, const char *detail);
+        hos_ps5_bug_report("crash", "FATAL", buf);
+    }
+#endif
     fprintf(stderr, "[hos %s] FATAL: %s", cur ? cur->name : "host", buf);
     if (c) fprintf(stderr, " (lr %#llx sp %#llx)", (unsigned long long)c->x[30], (unsigned long long)c->x[31]);
     fprintf(stderr, "\n");
