@@ -1269,19 +1269,23 @@ void hos_ps5_bug_report(const char *kind, const char *reason, const char *detail
     snprintf(title, sizeof title, "%.*s", cut ? (int)(cut - trace) : (int)strlen(trace), trace);
     const char *hos_version(void);
     const char *asset_prefetch_scene_now(void);
+    int hos_longshot_env_read(void);   /* (host/hos_main.c) */
     const char *scene = asset_prefetch_scene_now();
     const uint64_t raw = __atomic_load_n(&g_last_draw_key, __ATOMIC_RELAXED);
     snprintf(facts, sizeof facts,
              "Version: %s\nScene: %s\nFree memory: %llu MiB (the last the watchdog saw)\nFrames shown: %lld\n"
              "Last graphics program: %016llx (stages %016llx, %016llx)\nLast compute program: %016llx\n"
-             "Last program drawn: %016llx (%s)\n", hos_version(), scene && scene[0] ? scene : "not known yet",
+             "Last program drawn: %016llx (%s)\nMemory floor: %llu MiB (the title closes itself under it)\n"
+             "longshot_env.txt: %s\n", hos_version(), scene && scene[0] ? scene : "not known yet",
              (unsigned long long)__atomic_load_n(&g_ps5_free_mem_mb, __ATOMIC_RELAXED),
              (long long)__atomic_load_n(&g_last_present_seen, __ATOMIC_RELAXED),
              (unsigned long long)__atomic_load_n(&g_last_gfx_key, __ATOMIC_RELAXED),
              (unsigned long long)__atomic_load_n(&g_last_gfx_stage0, __ATOMIC_RELAXED),
              (unsigned long long)__atomic_load_n(&g_last_gfx_stage1, __ATOMIC_RELAXED),
              (unsigned long long)__atomic_load_n(&g_last_cs_key, __ATOMIC_RELAXED),
-             (unsigned long long)(raw & ~(1ull << 63)), (raw >> 63) ? "compute" : "graphics");
+             (unsigned long long)(raw & ~(1ull << 63)), (raw >> 63) ? "compute" : "graphics",
+             (unsigned long long)(floor_bytes() >> 20),
+             hos_longshot_env_read() ? "read" : "not found (the PS5 profile's safe values were used)");
     if (hos_ps5_bug_report_write(title, kind ? kind : "crash", reason, detail, facts, made, sizeof made))
         hos_ps5_klog_now("[ps5] the break's report: %s", made);
 }
@@ -1295,6 +1299,7 @@ static void ps5_crash_sig_handler(int sig) {
     _exit(128 + sig);
 }
 
+void hos_log(const char *fmt, ...);   /* (host/hos_thread.c: the log, kept for a break's report) */
 static void *memory_floor_watch(void *unused) {
     (void)unused;
     const uint64_t floor = floor_bytes();
@@ -1311,7 +1316,7 @@ static void *memory_floor_watch(void *unused) {
         uint64_t pieces = 0;
         const uint64_t room = direct_room_now(&pieces);
         if (room < (1ull << 30) && room >> 28 < low >> 28)
-            fprintf(stderr, "[ps5] memory floor: %llu MiB of direct memory free in %llu pieces (the title closes under %llu)\n",
+            hos_log("[ps5] memory floor: %llu MiB of direct memory free in %llu pieces (the title closes under %llu)",
                     (unsigned long long)(room >> 20), (unsigned long long)pieces, (unsigned long long)(floor >> 20));
         if (room < low) low = room;
         int64_t cur_p = __atomic_load_n(&g_last_present_seen, __ATOMIC_RELAXED);
@@ -1333,26 +1338,27 @@ static void *memory_floor_watch(void *unused) {
         zone_boost_update_mem(room >> 20, floor >> 20);
         if (room < floor) {
             ps5_write_crash_trace("MEMORY_FLOOR_EXIT", room >> 20);
-            hos_ps5_bug_report("crash", "MEMORY_FLOOR_EXIT", "the title closed itself: the console was running out of memory");
             int64_t at = 0;
             size_t largest = 0;
             sceKernelAvailableDirectMemorySize(0, sceKernelGetDirectMemorySize(), 0x10000, &at, &largest);
             struct ps5_heap_stats heap = {0};
             ps5_heap_stats(&heap);
             extern uint64_t radv_ps5_allocated_bytes;
-            fprintf(stderr, "[ps5] memory floor: %llu MiB free (largest piece %llu MiB, %llu pieces) is under the floor of %llu MiB: "
+            hos_log("[ps5] memory floor: %llu MiB free (largest piece %llu MiB, %llu pieces) is under the floor of %llu MiB: "
                     "closing the title before the console runs out (direct memory %llu MiB: guest pages %llu MiB, heap %llu MiB, "
-                    "the driver's buffers %llu MiB)\n",
+                    "the driver's buffers %llu MiB)",
                     (unsigned long long)(room >> 20), (unsigned long long)(largest >> 20), (unsigned long long)pieces,
                     (unsigned long long)(floor >> 20), (unsigned long long)(sceKernelGetDirectMemorySize() >> 20),
                     (unsigned long long)(committed_bytes >> 20), (unsigned long long)(heap.mapped_bytes >> 20),
                     (unsigned long long)(__atomic_load_n(&radv_ps5_allocated_bytes, __ATOMIC_RELAXED) >> 20));
+            /* (after the breakdown: the report's log.txt then has it) */
+            hos_ps5_bug_report("crash", "MEMORY_FLOOR_EXIT", "the title closed itself: the console was running out of memory");
             {   /* (what the first start's pipeline build has under way, if it is building: gpu/vk/vk_draw.cpp) */
                 extern void rx_vk_inflight(char *out, size_t n) __attribute__((weak));
                 char inflight[1024];
                 if (rx_vk_inflight) {
                     rx_vk_inflight(inflight, sizeof inflight);
-                    if (inflight[0]) fprintf(stderr, "[ps5] memory floor: pipelines being built:%s\n", inflight);
+                    if (inflight[0]) hos_log("[ps5] memory floor: pipelines being built:%s", inflight);
                 }
             }
             {   /* (the start-up's shader preparation under way, gpu/vk/vk_main.cpp: no setting of the player's to blame, and the

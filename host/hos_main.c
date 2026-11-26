@@ -497,6 +497,20 @@ static int env_line_allowed(const char *name, const char *value) {
     const int drive = ((value[0] | 0x20) >= 'a' && (value[0] | 0x20) <= 'z' && value[1] == ':');
     return !strpbrk(value, "/\\") && !drive && value[0] != '~' && strcmp(value, ".") && strcmp(value, "..");
 }
+static int env_read;   /* (longshot_env.txt was read: hos_longshot_env_read, the PS5's break report) */
+#if defined(__PROSPERO__) || defined(HOS_ENV_SAFE_TEST)
+/* (PS5) without longshot_env.txt the title runs on the compiled defaults, which are a PC's: a 220 MiB floor, textures up to
+   2048. A PS5 / PS5 Slim profile's measured values (ps5/builder/pipeline.py, base) apply then, so a title folder copied
+   without its env file does not run the console out of memory; a value set another way stays. A PS5 Pro cannot be told
+   from a base console without the file: it gets these too. */
+static void env_safe_defaults(void) {
+    static const char *const safe[][2] = {{"HOS_PS5_MEM_FLOOR_MB", "400"}, {"RX_VK_TEX_MAX_DIM", "512"},
+                                          {"RX_VK_TEX_SKIP_MB", "2"}, {"HOS_PS5_TEX_RESERVE_MB", "1800"}};
+    for (size_t i = 0; i < sizeof safe / sizeof *safe; i++) setenv(safe[i][0], safe[i][1], 0);
+    hos_log("env: longshot_env.txt not found: the PS5 profile's safe values are used (memory floor 400 MiB, textures 512); "
+            "copy the whole title folder again, longshot_env.txt with it");
+}
+#endif
 static void load_longshot_env(void) {
     char path[MAX_PATH + 32];
     const char *other = getenv("HOS_ENV_FILE");
@@ -517,7 +531,13 @@ static void load_longshot_env(void) {
         memcpy(path + n, "longshot_env.txt", 17);
     }
     FILE *f = fopen(path, "r");
-    if (!f) return;
+    if (!f) {
+#if defined(__PROSPERO__) || defined(HOS_ENV_SAFE_TEST)
+        if (!(other && *other) && !env_read) env_safe_defaults();
+#endif
+        return;
+    }
+    env_read = 1;
     /* The environment the game was started with wins over the file: a switch set for one launch (HOS_FULLSCREEN=0 in a
        shell, a script's RX_VK_PACE=1) beats the same name saved in the file. The file's own later lines still replace its
        earlier ones: the names it set are kept here (for the whole run: a second read sets them again), so they are not taken
@@ -557,6 +577,7 @@ static void load_longshot_env(void) {
     }
     fclose(f);
 }
+int hos_longshot_env_read(void) { return env_read; }   /* (host/ps5/win32_ps5.c: the break's report) */
 
 /* Switches this build no longer reads, still set (in the environment or longshot_env.txt, as older issues told players):
    one log line each, naming what took its place, so a bug report shows the switch did nothing */
