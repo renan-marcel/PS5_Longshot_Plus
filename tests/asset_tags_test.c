@@ -9,6 +9,7 @@ static int failures;
 
 static int wanted_none(const char *path) { (void)path; return 0; }
 static int wanted_other(const char *path) { return !strcmp(path, "Model/Other.Other.bfres.zs"); }
+static int wanted_z(const char *path) { return !strcmp(path, "Model/Z.Z.bfres.zs"); }
 
 int main(void) {
     char path[256];
@@ -26,6 +27,13 @@ int main(void) {
     CHECK(id > 0 && !strcmp(asset_tags_path(id), "Model/Y.Y.bfres.zs"), "a newer read over the range replaces it (any slashes)");
     id = asset_tags_lookup(0x20000010);
     CHECK(id > 0 && !strcmp(asset_tags_path(id), "Model/X.X.bfres.zs"), "what was made before keeps its file");
+    /* (host/nn_fs.c read_at passes the game's own path: its mount name, then the romfs path) */
+    asset_tags_read(0x80000000, 0x100, "rom:/Model/Z.Z.bfres.zs");
+    id = asset_tags_lookup(0x80000010);
+    CHECK(id > 0 && !strcmp(asset_tags_path(id), "Model/Z.Z.bfres.zs"), "a read by the game's path (rom:/...) is tagged with its romfs path");
+    asset_tags_read(0x80001000, 0x100, "content://Model/W.W.bfres.zs");
+    id = asset_tags_lookup(0x80001010);
+    CHECK(id > 0 && !strcmp(asset_tags_path(id), "Model/W.W.bfres.zs"), "any mount name, any slashes after it");
     asset_tags_read(0x50000000, 8u << 20, "/pak/romfs/Model/Big.Big.bfres.zs");
     id = asset_tags_lookup(0x50000000 + (7u << 20));
     CHECK(id > 0 && !strcmp(asset_tags_path(id), "Model/Big.Big.bfres.zs"), "a range over several pages is found anywhere in it");
@@ -42,6 +50,11 @@ int main(void) {
     asset_tags_tally(&t, 0x20000100, 1u << 20, wanted_other);
     asset_tags_line(&t, line, sizeof line);
     CHECK(strstr(line, "unwanted_n=1"), "a file the zone does not want counts as unwanted");
+    memset(&t, 0, sizeof t);
+    asset_tags_tally(&t, 0x80000000, 1u << 20, wanted_z);
+    asset_tags_line(&t, line, sizeof line);
+    CHECK(strstr(line, "tagged_n=1 ") && strstr(line, "unwanted_n=0"),
+          "a file read by the game's path that the zone wants is not unwanted (Data.deps names it Model/...)");
 
     for (unsigned i = 0; i < 100000; i++) asset_tags_read(0x70000000ull + i * 0x1000ull, 0x800, "/pak/romfs/Many/File.bin");
     CHECK(asset_tags_lookup(0x70000000ull + 99999ull * 0x1000ull) > 0, "after 100,000 reads the newest is still found");
