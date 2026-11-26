@@ -114,7 +114,14 @@ static void the_brief(void) {
     memset(reg, 0xEE, sizeof reg);
     RC(amiibo_register_info(reg), 0);
     CHECK(memcmp(reg + 0x5C, "Link - Oca", 10) == 0 && reg[0x5C + 10] == 0);
-    for (int i = 0; i < 0x58; i++) CHECK(reg[i] == 0);   /* (the Mii charinfo: there, all zero) */
+    int mii_set = 0;   /* (the Mii charinfo: a neutral default Mii, not zeros) */
+    for (int i = 0; i < 0x58; i++) mii_set |= reg[i] != 0;
+    CHECK(mii_set);
+    static const uint8_t no_name[16] = {'n', 0, 'o', 0, ' ', 0, 'n', 0, 'a', 0, 'm', 0, 'e', 0, 0, 0};
+    CHECK(memcmp(reg + 0x10, no_name, sizeof no_name) == 0);   /* (nickname u16[10]: "no name", UTF-16LE) */
+    for (int i = 0x1E; i < 0x26; i++) CHECK(reg[i] == 0);   /* (the rest of it and its null terminator) */
+    CHECK((reg[6] & 0xF0) == 0x40 && (reg[8] & 0xC0) == 0x80);   /* (create ID: an RFC 4122 version 4 UUID) */
+    CHECK(reg[0x28] == 0 && reg[0x29] == 64 && reg[0x2A] == 64);   /* (male, height and build 64) */
     CHECK(u16le(reg + 0x58) == 2026 && reg[0x5A] == 1 && reg[0x5B] == 1);
     uint32_t size = 0;
     RC(amiibo_area_size(&size), 0);

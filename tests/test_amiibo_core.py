@@ -6,7 +6,8 @@ folder that stands for user/amiibo:
   a figure touched only while the game searches (activate signalled, deactivate cleared), Mount/Unmount, removal (deactivate
   signalled; the info calls then say TagRemoved), Finalize;
 - the infos from the 8-byte amiibo ID: ModelInfo (Link - Ocarina of Time), TagInfo (TypeA, Type2, a 7-byte UUID of the
-  figure's own, or random bytes on every read), CommonInfo (area size 0xD8), RegisterInfo (the name cut to 10 characters);
+  figure's own, or new random bytes on every read), CommonInfo (area size 0xD8), RegisterInfo (a neutral default Mii, the
+  name cut to 10 characters);
 - the application areas: <dir>/<amiibo id>/<access id>.bin and state.txt, the result codes for none, one already there and too
   big; auto-touch; emulation off.
 

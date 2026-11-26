@@ -3,8 +3,8 @@
 
    Adapted from Fritchii (Frizti/Fritchii, src/core/hle/service/nfc, GPLv3): the device states and their rules
    (nfc/common/device.cpp), the TagInfo / ModelInfo / CommonInfo / RegisterInfo layouts (nfp/nfp_types.h, nfc/nfc_types.h)
-   and the result codes. What differs, being virtual: no tag data and no keys. The infos are built from the figure's 8-byte
-   amiibo ID and name; an application area is a file per figure and access ID (<dir>/<amiibo id>/<access id>.bin, so each
+   and the result codes; and the owner's neutral Mii (default_mii) from src/core/hle/service/mii's base Mii. What differs,
+   being virtual: no tag data and no keys. The infos are built from the figure's 8-byte amiibo ID and name; an application area is a file per figure and access ID (<dir>/<amiibo id>/<access id>.bin, so each
    game keeps its own on the same figure), written as soon as the game writes it, with the write counter and the last write
    date beside it in state.txt. The tag's UUID is the figure's own (the first 7 bytes of FNV-1a-64 of its ID, little-endian),
    or random bytes on every GetTagInfo with the random tag ID on. Dates are fixed (2026-01-01): the core reads no clock.
@@ -398,7 +398,34 @@ uint32_t amiibo_common_info(uint8_t out[0x40]) {
     return rc;
 }
 
-/* RegisterInfo 0x100: the Mii CharInfo (0x58, all zero here), creation date (fixed), amiibo_name char[41] (UTF-8, up to 10
+/* The figure's owner: a fixed, neutral Mii CharInfo (0x58). Adapted from Fritchii (Frizti/Fritchii,
+   src/core/hle/service/mii, GPLv3): its BaseMii[0] (types/raw_data.cpp), the male base Mii, built as StoreData::BuildBase
+   builds it (the Ver3 colours through Fritchii's Ver3*ColorTable, eyebrow_y less 3) and laid out as mii/types/char_info.h's
+   CharInfo. Its create ID is a fixed RFC 4122 version 4 UUID (Fritchii makes a random one) and its nickname Fritchii's
+   default, "no name" (UTF-16LE, 10 characters, then a null terminator). */
+static const uint8_t default_mii[0x58] = {
+    /* 0x00 create_id: version 4 (byte 6's high nibble), RFC 4122 variant (byte 8's top bits 10) */
+    0x4c, 0x6f, 0x6e, 0x67, 0x73, 0x68, 0x4f, 0x74, 0xa0, 0x6d, 0x69, 0x69, 0x62, 0x6f, 0x00, 0x01,
+    /* 0x10 nickname u16[10] "no name", 0x24 null terminator u16 */
+    'n', 0, 'o', 0, ' ', 0, 'n', 0, 'a', 0, 'm', 0, 'e', 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    /* 0x26 font_region, favorite_color, gender (male), height 64, build 64, type, region_move */
+    0, 0, 0, 64, 64, 0, 0,
+    /* 0x2D faceline type, colour, wrinkle, make; hair type 33, colour 1, flip */
+    0, 0, 0, 0, 33, 1, 0,
+    /* 0x34 eye type 2, colour 8, scale 4, aspect 3, rotate 4, x 2, y 12 */
+    2, 8, 4, 3, 4, 2, 12,
+    /* 0x3B eyebrow type 6, colour 1, scale 4, aspect 3, rotate 6, x 2, y 7 */
+    6, 1, 4, 3, 6, 2, 7,
+    /* 0x42 nose type 1, scale 4, y 9; mouth type 23, colour 19, scale 4, aspect 3, y 13 */
+    1, 4, 9, 23, 19, 4, 3, 13,
+    /* 0x4A beard colour 8, beard type, mustache type, mustache scale 4, mustache y 10 */
+    8, 0, 0, 4, 10,
+    /* 0x4F glass type, colour 8, scale 4, y 10; mole type, scale 4, x 2, y 20; padding */
+    0, 8, 4, 10, 0, 4, 2, 20, 0,
+};
+typedef char default_mii_is_0x58[sizeof default_mii == 0x58 ? 1 : -1];
+
+/* RegisterInfo 0x100: the Mii CharInfo (0x58, default_mii), creation date (fixed), amiibo_name char[41] (UTF-8, up to 10
    characters), font_region u8, 0x7A pad */
 uint32_t amiibo_register_info(uint8_t out[0x100]) {
     if (!out) return AMIIBO_RC_INVALID_ARGUMENT;
@@ -406,6 +433,7 @@ uint32_t amiibo_register_info(uint8_t out[0x100]) {
     const uint32_t rc = need_mounted();
     if (!rc) {
         memset(out, 0, AMIIBO_REGISTER_INFO_SIZE);
+        memcpy(out, default_mii, sizeof default_mii);
         put16(out + 0x58, YEAR);
         out[0x5A] = MONTH;
         out[0x5B] = DAY;
