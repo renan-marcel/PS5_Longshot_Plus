@@ -58,9 +58,13 @@ typedef struct {
 #define AMIIBO_AREA_SIZE 0xD8
 
 /* The switches (the menu's): emulation on (a device is listed), a random tag ID on every GetTagInfo, touch the selected
-   figure as soon as the game searches. Defaults: off, off, on. Turning emulation on or off signals the availability
-   event while initialized. */
+   figure as soon as the game searches. Defaults: off, off, on, until amiibo_load_options. Turning emulation on or off
+   signals the availability event while initialized. */
 void amiibo_config(int emulation, int random_uid, int auto_touch);
+/* At start (hos_main.c, before the game runs): the switches and the figure from longshot_options.ini, as the menu saved
+   them (amiibo_emulation=, random_tag_id=, touch_when_the_game_asks=, each 1 when the file or its line is missing;
+   amiibo_figure_id=<16 hex digits>, named by its ID in hex until the menu sends the catalogue's name). */
+void amiibo_load_options(const char *ini_path);
 /* The user/amiibo folder (UTF-8): <dir>/<amiibo id>/<access id>.bin and state.txt. Without one, areas fail cleanly. */
 void amiibo_set_dir(const char *dir);
 /* signal/clear: an event (AMIIBO_EV_*); random: n random bytes (the random tag ID). Any may be NULL. */
@@ -71,6 +75,8 @@ void amiibo_set_hooks(void (*signal)(int ev), void (*clear)(int ev), void (*rand
 void amiibo_select(const AmiiboFigure *f);
 void amiibo_touch(void);
 void amiibo_remove(void);
+/* Whether emulation is on (the [NFP] Initialize line says it). */
+int amiibo_emulation_on(void);
 /* The device state (AMIIBO_STATE_*), -1 before the first Initialize. */
 int amiibo_device_state(void);
 

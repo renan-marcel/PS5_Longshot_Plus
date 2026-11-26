@@ -175,7 +175,7 @@ static uint32_t info(uint32_t (*fill)(uint8_t *), uint64_t out, size_t size, uin
 /* ---- the module */
 HLE(_ZN2nn3nfp10InitializeEv) {
     const uint32_t rc = amiibo_initialize();
-    nfp_log("[NFP] Initialize -> %#x", rc);
+    nfp_log("[NFP] Initialize -> %#x (emulation %s)", rc, amiibo_emulation_on() ? "on" : "off");
     RET(rc);
 }
 

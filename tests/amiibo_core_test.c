@@ -315,12 +315,76 @@ static void hooks_reenter(void) {
     amiibo_set_hooks(on_signal, on_clear, on_random);
 }
 
+/* (a run of its own: the core as hos_main.c leaves it at start) amiibo_load_options(ini) before the game's first call and
+   before any menu call: what the game's Initialize, ListDevices and StartDetection then see is the file's. want: emulation,
+   random tag ID, touch when the game asks (0/1), and the figure's 16 hex digits or "-" for none */
+static void seeded(const char *ini, int on, int random_on, int auto_on, const char *figure) {
+    uint64_t handles[2];
+    int count = -1;
+    uint8_t tag[0x58], tag2[0x58], model[0x40], reg[0x100];
+    const int have = strcmp(figure, "-") != 0;
+    amiibo_load_options(ini);
+    CHECK(amiibo_emulation_on() == on);
+    CHECK(amiibo_device_state() == -1);   /* (no Initialize yet) */
+    RC(amiibo_initialize(), 0);
+    CHECK(signals[AMIIBO_EV_AVAILABILITY] == 0);   /* (already so at the game's Initialize: nothing changed after it) */
+    RC(amiibo_list_devices(handles, 2, &count), 0);
+    CHECK(count == on);
+    if (!on) {
+        RC(amiibo_start_detection(), AMIIBO_RC_DEVICE_NOT_FOUND);
+        return;
+    }
+    RC(amiibo_start_detection(), 0);
+    if (!auto_on || !have) {
+        CHECK(amiibo_device_state() == AMIIBO_STATE_SEARCHING_FOR_TAG);
+        if (!have) return;
+        amiibo_touch();
+    }
+    CHECK(amiibo_device_state() == AMIIBO_STATE_TAG_FOUND);
+    RC(amiibo_mount(), 0);
+    RC(amiibo_model_info(model), 0);
+    char hex[17];
+    for (int i = 0; i < 4; i++) snprintf(hex + 2 * i, 3, "%02x", model[i]);
+    snprintf(hex + 8, 9, "%04x%02x", (unsigned)(model[4] | model[5] << 8), model[6]);
+    CHECK(strncmp(hex, figure, 14) == 0);   /* (the ID's first 7 bytes, as ModelInfo gives them) */
+    RC(amiibo_register_info(reg), 0);
+    CHECK(memcmp(reg + 0x5C, figure, 10) == 0 && reg[0x5C + 10] == 0);   /* (the ID in hex stands for the name) */
+    const unsigned calls = random_calls;
+    RC(amiibo_tag_info(tag), 0);
+    RC(amiibo_tag_info(tag2), 0);
+    CHECK((random_calls == calls + 2) == (random_on != 0));
+    CHECK((memcmp(tag, tag2, 7) != 0) == (random_on != 0));
+    /* the menu's first tick: the same switches, the same figure with its catalogue name. It stays on the reader */
+    AmiiboFigure named;
+    memset(&named, 0, sizeof named);
+    for (int i = 0; i < 8; i++) {
+        unsigned b = 0;
+        sscanf(figure + 2 * i, "%2x", &b);
+        named.id[i] = (uint8_t)b;
+    }
+    snprintf(named.name, sizeof named.name, "Link - Ocarina of Time");
+    amiibo_config(on, random_on, auto_on);
+    amiibo_select(&named);
+    CHECK(amiibo_device_state() == AMIIBO_STATE_TAG_MOUNTED);
+    CHECK(signals[AMIIBO_EV_AVAILABILITY] == 0 && signals[AMIIBO_EV_DEACTIVATE] == 0);
+    RC(amiibo_register_info(reg), 0);
+    CHECK(memcmp(reg + 0x5C, "Link - Oca", 10) == 0);
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
-        printf("usage: amiibo_core_test <dir>\n");
+        printf("usage: amiibo_core_test <dir> [seed <ini> <emulation> <random> <auto> <figure|->]\n");
         return 2;
     }
     snprintf(dir, sizeof dir, "%s", argv[1]);
+    if (argc == 8 && !strcmp(argv[2], "seed")) {
+        amiibo_set_dir(dir);
+        amiibo_set_hooks(on_signal, on_clear, on_random);
+        seeded(argv[3], atoi(argv[4]), atoi(argv[5]), atoi(argv[6]), argv[7]);
+        if (failed) return 1;
+        printf("PASS\n");
+        return 0;
+    }
     amiibo_config(1, 0, 0);
     amiibo_set_dir(dir);
     amiibo_set_hooks(on_signal, on_clear, on_random);

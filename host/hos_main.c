@@ -2094,6 +2094,9 @@ static int game_main(int argc, char **argv) {
         amiibo_set_hooks(hos_nfp_signal, hos_nfp_clear, hos_nfp_random);
     }
     hos_options_carry();  /* (a game folder's settings from before into the user folder, once: host/options_path.c) */
+    /* (the Amiibo tab's switches and figure, from the options file, before the game's NfpMgr can ask: the menu sends its
+       own only once it first ticks) */
+    amiibo_load_options(hos_options_file());
     if (!reserve_guest()) {
         fprintf(stderr, "cannot reserve the guest window\n");
         return 1;

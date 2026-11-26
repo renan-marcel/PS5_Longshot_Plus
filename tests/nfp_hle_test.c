@@ -117,6 +117,7 @@ int main(int argc, char **argv) {
     CALL(29AttachAvailabilityChangeEventEPNS_2os15SystemEventTypeE, EVENT, 0, 0, 0);
     CHECK(ev_init_key == EVENT && ev_init_mode == 0, "AttachAvailabilityChangeEvent inits the guest event (manual clear)");
     CHECK(CALL(10InitializeEv, 0, 0, 0, 0) == OK, "Initialize");
+    CHECK(strstr(last_line, "[NFP] Initialize -> 0 (emulation off)") != NULL, "the Initialize line says the emulation switch");
 
     /* emulation off (the default): no device, success; the device calls answer DeviceNotFound */
     p32(COUNT, 77);
@@ -281,6 +282,7 @@ int main(int argc, char **argv) {
     hos_nfp_signal(AMIIBO_EV_AVAILABILITY);
     hos_nfp_clear(AMIIBO_EV_AVAILABILITY);
     CHECK(CALL(10InitializeEv, 0, 0, 0, 0) == OK, "Initialize again (no event attached)");
+    CHECK(strstr(last_line, "(emulation on)") != NULL, "the Initialize line says the emulation switch (on)");
     amiibo_config(0, 0, 1);
     amiibo_config(1, 0, 1);
     CHECK(ev_signals == after_signals && ev_clears == after_clears, "no signal or clear reaches the old event after Finalize");

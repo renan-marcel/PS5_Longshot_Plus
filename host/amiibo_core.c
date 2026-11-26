@@ -14,6 +14,7 @@
 #include "amiibo_core.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifdef _WIN32
@@ -206,6 +207,45 @@ void amiibo_config(int emulation_on, int random_on, int auto_touch_on) {
     UNLOCK();
 }
 
+/* (hos_main.c, before the game starts) the Amiibo tab's rows as longshot_options.ini saved them (gpu/vk/vk_menu.cpp: ini_key
+   of each row, and amiibo_figure_id=), so the game's first Initialize and ListDevices see them, not the core's defaults: the
+   renderer's menu sends its own only once it first ticks, which can be after the game has asked. The last line of a key
+   counts, as host/nn_applet.c's ini_text reads them. The figure's name is not in the file (the catalogue has it): its ID in
+   hex stands for it until the menu sends the real one (amiibo_select with the same ID keeps the figure on the reader) */
+static int hex_digit(int c) {
+    return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+}
+void amiibo_load_options(const char *ini_path) {
+    int on = 1, random_on = 1, auto_on = 1, have_figure = 0;
+    AmiiboFigure f;
+    memset(&f, 0, sizeof f);
+    FILE *file = ini_path && ini_path[0] ? fopen(ini_path, "r") : NULL;
+    if (file) {
+        static const char *const keys[3] = {"amiibo_emulation=", "random_tag_id=", "touch_when_the_game_asks="};
+        int *const values[3] = {&on, &random_on, &auto_on};
+        char line[128];
+        while (fgets(line, sizeof line, file)) {
+            for (int k = 0; k < 3; k++)
+                if (!strncmp(line, keys[k], strlen(keys[k]))) *values[k] = atoi(line + strlen(keys[k])) != 0;
+            if (!strncmp(line, "amiibo_figure_id=", 17)) {
+                const char *h = line + 17;
+                int ok = 1;
+                for (int i = 0; i < 16 && ok; i++) ok = hex_digit((unsigned char)h[i]) >= 0;
+                ok = ok && (h[16] == 0 || h[16] == '\r' || h[16] == '\n' || h[16] == ' ' || h[16] == '\t');
+                have_figure = ok;   /* (a line that is not 16 hex digits: none, as the menu finds none for it) */
+                if (ok) {
+                    for (int i = 0; i < 8; i++)
+                        f.id[i] = (uint8_t)(hex_digit((unsigned char)h[2 * i]) << 4 | hex_digit((unsigned char)h[2 * i + 1]));
+                    for (int i = 0; i < 8; i++) snprintf(f.name + 2 * i, 3, "%02x", f.id[i]);
+                }
+            }
+        }
+        fclose(file);
+    }
+    amiibo_config(on, random_on, auto_on);
+    amiibo_select(have_figure ? &f : NULL);
+}
+
 void amiibo_set_dir(const char *d) {
     LOCK();
     const char *s = d ? d : "";
@@ -230,6 +270,7 @@ void amiibo_select(const AmiiboFigure *f) {
     if (f) {
         figure = *f;
         figure.name[sizeof figure.name - 1] = 0;
+        if (on_reader && state != AMIIBO_STATE_TAG_REMOVED) tag = figure;   /* (the same figure on the reader: its name now) */
     } else {
         memset(&figure, 0, sizeof figure);
     }
@@ -246,6 +287,13 @@ void amiibo_remove(void) {
     LOCK();
     remove_locked();
     UNLOCK();
+}
+
+int amiibo_emulation_on(void) {
+    LOCK();
+    const int on = emulation;
+    UNLOCK();
+    return on;
 }
 
 int amiibo_device_state(void) {
