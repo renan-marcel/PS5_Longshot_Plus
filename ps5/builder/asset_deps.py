@@ -46,8 +46,10 @@ import data_packs  # noqa: E402
 
 DEPS_NAME = "Data.deps"
 MAGIC = b"LSDP"
-VERSION = 1
+VERSION = 2
 HEAD = 0x80
+HEAD_V2 = 0xD0   # (version 2: the zone tables' offsets after the version 1 header, at 0x80)
+ZONE_MAX_SCENES = 4  # (a folder of more scenes than this is not a zone: its scenes are zones of their own)
 MODELS_BY_PROJECT = 8    # (a ModelProjectName with no FmdbName: at most this many of its models)
 ZSTD = b"\x28\xb5\x2f\xfd"
 
@@ -374,9 +376,37 @@ def build(title):
         romfs.close()
 
 
-def encode(rows, bid):
+def own_folder(scene, files):
+    """the folder of a scene's own maps (Banc/<folder>/<scene>_...), None when it has none"""
+    for f in files:
+        parts = f.split("/")
+        if len(parts) == 3 and parts[0] == "Banc" and parts[1] != "GameBancParam" and parts[2].startswith(scene + "_"):
+            return parts[1]
+    return None
+
+
+def zones(rows):
+    """(zone names, {scene: zone index}): a scene's zone is its own maps' folder (a place's child and adult scenes, its
+    variants); a folder of more than ZONE_MAX_SCENES scenes (the game's boss and fight rooms, reached from everywhere, about
+    20 together) is no zone, each of its scenes its own. A field leading to many places is still one zone"""
+    folder = {s: own_folder(s, files) or s for s, files, _, _ in rows}
+    count = {}
+    for f in folder.values():
+        count[f] = count.get(f, 0) + 1
+    names, of = [], {}
+    for s, _, _, _ in rows:
+        z = s if count[folder[s]] > ZONE_MAX_SCENES else folder[s]
+        if z not in names:
+            names.append(z)
+        of[s] = names.index(z)
+    return names, of
+
+
+def encode(rows, bid, version=VERSION):
+    """Data.deps for scene rows [(scene, files, neighbours, bytes)]: version 2 (the default) with the zones, 1 without"""
     paths, path_index = [], {}
     names = bytearray()
+    head_size = HEAD_V2 if version >= 2 else HEAD
 
     def name(text):
         b = text.encode("utf-8")
@@ -397,33 +427,50 @@ def encode(rows, bid):
         nfirst = len(neighbours)
         neighbours.extend(scene_index[n] for n in nbrs)
         scene_recs.append(struct.pack("<6IQ", no, nl, first, len(files), nfirst, len(nbrs), total))
+    if version >= 2:   # (the zones: each zone's scenes, files and neighbour zones, and each scene's zone)
+        znames, zof = zones(rows)
+        zscenes, zfiles, znbrs, zrecs = [], [], [], []
+        for zi, z in enumerate(znames):
+            members = [s for s, _, _, _ in rows if zof[s] == zi]
+            seen = dict.fromkeys(f for s, files, _, _ in rows if zof[s] == zi for f in files)
+            near = dict.fromkeys(znames[zof[n]] for s, _, nbrs, _ in rows if zof[s] == zi for n in nbrs if zof[n] != zi)
+            no, nl = name(z)
+            zrecs.append(struct.pack("<8I", no, nl, len(zscenes), len(members), len(zfiles), len(seen), len(znbrs), len(near)))
+            zscenes.extend(scene_index[m] for m in members)
+            zfiles.extend(path_index[f] for f in seen)
+            znbrs.extend(znames.index(n) for n in near)
     body = bytearray()
 
     def section(blob):
         while len(body) % 8:
             body.append(0)
-        off = HEAD + len(body)
+        off = head_size + len(body)
         body.extend(blob)
         return off
 
+    u32s = lambda v: struct.pack("<%dI" % len(v), *v)   # noqa: E731
     scenes_off = section(b"".join(scene_recs))
-    lists_off = section(struct.pack("<%dI" % len(lists), *lists))
+    lists_off = section(u32s(lists))
     paths_off = section(b"".join(struct.pack("<II", o, n) for o, n in paths))
-    nbr_off = section(struct.pack("<%dI" % len(neighbours), *neighbours))
+    nbr_off = section(u32s(neighbours))
     names_off = section(bytes(names))
-    head = bytearray(HEAD)
-    struct.pack_into("<4sIII", head, 0, MAGIC, VERSION, len(rows), len(paths))
+    head = bytearray(head_size)
+    struct.pack_into("<4sIII", head, 0, MAGIC, version, len(rows), len(paths))
     head[0x10:0x20] = bid
     struct.pack_into("<QQQQ", head, 0x20, scenes_off, lists_off, len(lists), paths_off)
     struct.pack_into("<QQQQ", head, 0x40, names_off, len(names), nbr_off, len(neighbours))
-    head[0x60:0x80] = hashlib.sha256(bytes(body)).digest()
+    if version >= 2:
+        struct.pack_into("<9Q", head, 0x80, section(b"".join(zrecs)), len(znames), section(u32s(zscenes)), len(zscenes),
+                         section(u32s(zfiles)), len(zfiles), section(u32s(znbrs)), len(znbrs),
+                         section(u32s([zof[s] for s, _, _, _ in rows])))
+    head[0x60:0x80] = hashlib.sha256(bytes(head[0x80:]) + bytes(body)).digest()
     return bytes(head) + bytes(body)
 
 
 def decode(blob):
     """The reference reader (the checks; host/ps5/asset_prefetch.c reads it in C): {scene: (files, neighbours, bytes)}"""
-    if blob[:4] != MAGIC or struct.unpack_from("<I", blob, 4)[0] != VERSION:
-        raise ValueError("not a version %d prefetch map" % VERSION)
+    if blob[:4] != MAGIC or struct.unpack_from("<I", blob, 4)[0] not in (1, 2):
+        raise ValueError("not a version 1 or 2 prefetch map")
     if hashlib.sha256(blob[HEAD:]).digest() != blob[0x60:0x80]:
         raise ValueError("prefetch map SHA-256 mismatch")
     nscenes, npaths = struct.unpack_from("<II", blob, 8)
@@ -437,6 +484,27 @@ def decode(blob):
     names = [text(r[0], r[1]) for r in recs]
     return {names[i]: ([paths[k] for k in lists[r[2]:r[2] + r[3]]], [names[k] for k in nbrs[r[4]:r[4] + r[5]]], r[6])
             for i, r in enumerate(recs)}
+
+def decode_zones(blob):
+    """({scene: zone}, {zone: (scenes, files, neighbour zones)}); a version 1 map: each scene a zone of its own"""
+    rows = decode(blob)
+    if struct.unpack_from("<I", blob, 4)[0] < 2:
+        return {s: s for s in rows}, {s: ([s], files, nbrs) for s, (files, nbrs, _) in rows.items()}
+    nscenes, npaths = struct.unpack_from("<II", blob, 8)
+    paths_off = struct.unpack_from("<Q", blob, 0x38)[0]
+    names_off = struct.unpack_from("<Q", blob, 0x40)[0]
+    scenes_off = struct.unpack_from("<Q", blob, 0x20)[0]
+    zo, nz, zso, _, zfo, _, zno, _, szo = struct.unpack_from("<9Q", blob, 0x80)
+    text = lambda o, n: blob[names_off + o:names_off + o + n].decode("utf-8")   # noqa: E731
+    paths = [text(*struct.unpack_from("<II", blob, paths_off + 8 * i)) for i in range(npaths)]
+    scenes = [text(*struct.unpack_from("<II", blob, scenes_off + 32 * i)) for i in range(nscenes)]
+    recs = [struct.unpack_from("<8I", blob, zo + 32 * i) for i in range(nz)]
+    znames = [text(r[0], r[1]) for r in recs]
+    u32 = lambda off, i: struct.unpack_from("<I", blob, off + 4 * i)[0]   # noqa: E731
+    of = {scenes[i]: znames[u32(szo, i)] for i in range(nscenes)}
+    zs = {znames[k]: ([scenes[u32(zso, r[2] + j)] for j in range(r[3])], [paths[u32(zfo, r[4] + j)] for j in range(r[5])],
+                      [znames[u32(zno, r[6] + j)] for j in range(r[7])]) for k, r in enumerate(recs)}
+    return of, zs
 
 
 def current(app):
@@ -462,12 +530,15 @@ def ensure(app, report=None):
     with open(tmp, "wb") as f:
         f.write(blob)
     os.replace(tmp, os.path.join(app, DEPS_NAME))
-    say("prefetch map: %s, %d scenes, %.1f KB%s" % (DEPS_NAME, len(rows), len(blob) / 1e3,
+    say("prefetch map: %s, %d scenes in %d zones, %.1f KB%s" % (DEPS_NAME, len(rows), len(zones(rows)[0]), len(blob) / 1e3,
         (" (%s)" % ", ".join("%s: %d" % kv for kv in sorted(info["problems"].items()))) if info["problems"] else ""))
     if report:
         with open(report, "w", encoding="utf-8") as f:
-            json.dump({"scenes": [{"scene": s, "files": len(fl), "bytes": t, "leads_to": n, "first_files": fl[:40]}
-                                  for s, fl, n, t in rows], "problems": info["problems"]}, f, indent=1, ensure_ascii=False)
+            znames, zof = zones(rows)
+            json.dump({"scenes": [{"scene": s, "zone": znames[zof[s]], "files": len(fl), "bytes": t, "leads_to": n,
+                                   "first_files": fl[:40]} for s, fl, n, t in rows],
+                       "zones": {z: [s for s, _, _, _ in rows if zof[s] == i] for i, z in enumerate(znames)},
+                       "problems": info["problems"]}, f, indent=1, ensure_ascii=False)
 
 
 def main():

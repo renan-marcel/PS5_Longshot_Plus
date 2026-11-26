@@ -38,8 +38,10 @@ packs, their models `Model/*.bfres.zs`, ...) and the scenes it leads to. A scene
 `_Child`, `Market`, `KakarikoVillage` three, each temple one), with one exception: one folder holds the boss and fight
 stages of many places (about 3 GB together), which is not a zone.
 
-- **Rule:** a scene's zone is its maps' folder. **Except** a folder whose scenes lead to more than 4 different zones
-  (counted over all its scenes' neighbours): then each of its scenes is a zone of its own. No place names in the code.
+- **Rule:** a scene's zone is its maps' folder. **Except** a folder of more than 4 scenes (the boss and fight rooms,
+  about 20 together): then each of its scenes is a zone of its own. No place names in the code. (First drafted as
+  "leads to more than 4 zones": on the person's game that split Hyrule Field, Kakariko and Ganon's Castle, which do lead
+  to many places; the scene count tells the rooms apart. On that game: 80 scenes, 59 zones.)
 - **`Data.deps` version 2** adds a zone table: name, its scenes, its file list (the union of its scenes' lists, in first-
   wanted order), its neighbour zones (the zones of its scenes' neighbours), and each scene's zone index. Readers take
   version 1 too (no zones: each scene its own zone).

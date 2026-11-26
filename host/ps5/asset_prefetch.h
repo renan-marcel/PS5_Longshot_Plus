@@ -25,6 +25,11 @@ extern "C" {
 void asset_prefetch_init(const char *title_dir);
 /* The game's current scene, as it says it (Sequence_CurrentBanc: host/hos_main.c, every half second). */
 void asset_prefetch_scene(const char *scene);
+/* The game's current zone: its scene's maps' folder (Data.deps version 2), else the scene; "" before the first. */
+const char *asset_prefetch_zone_now(void);
+/* Called once per change of zone (old "" at the first), on the thread that told the scene, with no lock held. */
+typedef void (*asset_zone_cb)(const char *old_zone, const char *new_zone);
+void asset_prefetch_on_zone(asset_zone_cb cb);
 /* A file of the packs the game opened: its path (under PAK_ROMFS_ROOT) and its span. */
 void asset_prefetch_open(const char *path, int fd, uint64_t base, uint64_t size);
 /* A read of the game's in a file's span: 1 when the bucket held it (copied into buf), 0 when the caller reads the disk and

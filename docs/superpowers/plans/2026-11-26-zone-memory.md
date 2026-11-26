@@ -14,7 +14,7 @@
 
 - Branch `feature/zone-memory` (from `feature/amiibo`).
 - No game file, scene/zone name list or game-derived data in the repository; tests use made-up scenes and files.
-- Zone rule: a scene's zone is its own maps' folder (`Banc/<folder>/<scene>_*`); a folder whose scenes' neighbours fall in **more than 4** zones is not a zone (each of its scenes is its own). No place names in code.
+- Zone rule: a scene's zone is its own maps' folder (`Banc/<folder>/<scene>_*`); a folder of **more than 4** scenes is not a zone (each of its scenes is its own). No place names in code.
 - `Data.deps` version 2 adds zones; every reader accepts version 1 (each scene its own zone).
 - PS5 log files: `<title folder>/logs/<name>` through one helper, 1 MB cap, started afresh when already past it.
 - Safe values without `longshot_env.txt` on a base PS5: `HOS_PS5_MEM_FLOOR_MB=400`, `RX_VK_TEX_MAX_DIM=512`, `RX_VK_TEX_SKIP_MB=2`, `HOS_PS5_TEX_RESERVE_MB=1800` (the base profile's, `ps5/builder/pipeline.py`); a PS5 Pro (`HOS_PS5_RENDER_MB` ≥ 3200 is how the code tells it; without the file it cannot) is treated as base.
