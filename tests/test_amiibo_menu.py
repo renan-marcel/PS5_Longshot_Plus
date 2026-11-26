@@ -9,7 +9,9 @@ amiibo rows of the table, compiled against a stand-in host and run on a small ca
 pictures): the start sends the switches (amiibo_config) and the saved figure found by its ID (amiibo_select); a change of
 Amiibo emulation, Random tag ID or Touch when the game asks calls amiibo_config, a change of Figure or Surprise me calls
 amiibo_select and saves the new ID; another Series puts Figure on its first figure; Touch / Remove touches unless the
-figure is on the reader or read; a host from before (no amiibo calls) is left alone.
+figure is on the reader or read; the card's status line says when emulation is off; a figure picked while the game is
+already looking is touched once when the menu closes (Touch when the game asks on); a host from before (no amiibo calls)
+is left alone.
 
     python -I -B tests/test_amiibo_menu.py [--cxx g++] [--source ROOT]
 """
@@ -65,6 +67,7 @@ def catalogue(folder):
 
 DRIVER = r'''
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -102,11 +105,13 @@ void st_config(int a, int b, int c) { configs++, cfg[0] = a, cfg[1] = b, cfg[2] 
 Host full{st_status, st_select, st_touch, st_config}, old{};
 const Host* host = &full;
 void save() { saves++; }
+std::atomic<bool> open_now{false};
 /* CATALOGUE */
 Row rows[] = {
 /* ROWS */
 };
 /* LOGIC */
+/* STATUS LINE */
 Row& row(const char* name) {
     for (Row& r : rows) if (!strcmp(r.name, name)) return r;
     CHECK(!"no such row");
@@ -183,6 +188,52 @@ int main(int, char** argv) {
     }
     CHECK(!amiibo_press(row("Figure")));   // (a row with a value: not an action)
 
+    // the card's status line: the reader's state, or that emulation is off
+    opts.amiibo_on = 1;
+    CHECK(!strcmp(amiibo_status_line(1), "The game is looking: touch to use") && !strcmp(amiibo_status_line(4), "Read"));
+    opts.amiibo_on = 0;
+    for (int st = -1; st <= 6; st++) CHECK(!strcmp(amiibo_status_line(st), "Amiibo emulation is off"));
+
+    // a figure picked in the menu while the game already looks (Touch when the game asks on): touched once, when the menu
+    // closes; not at each Figure step, not when the figure is the one the menu opened on, not with the switch off
+    start(0, "01000000037c0002");
+    status = 1;
+    const int tc = touches;
+    open_now = true, amiibo_tick();
+    opts.amiibo_figure = 1, amiibo_tick();
+    opts.amiibo_figure = 2, amiibo_tick();
+    CHECK(touches == tc);   // (the steps: no touch while the menu is open)
+    open_now = false, amiibo_tick();
+    CHECK(touches == tc + 1 && touched == 1);
+    amiibo_tick();
+    CHECK(touches == tc + 1);   // (once)
+    open_now = true, amiibo_tick();
+    opts.amiibo_figure = 1, amiibo_tick();
+    opts.amiibo_figure = 2, amiibo_tick();   // (back to the figure it opened on)
+    open_now = false, amiibo_tick();
+    CHECK(touches == tc + 1);
+    status = 0;   // (the game not looking: StartDetection touches it then)
+    open_now = true, amiibo_tick();
+    opts.amiibo_figure = 3, amiibo_tick();
+    open_now = false, amiibo_tick();
+    CHECK(touches == tc + 1);
+    status = 1, opts.amiibo_auto = 0;   // (the switch off: the player touches)
+    open_now = true, amiibo_tick();
+    opts.amiibo_figure = 0, amiibo_tick();
+    open_now = false, amiibo_tick();
+    CHECK(touches == tc + 1);
+    opts.amiibo_auto = 1, opts.amiibo_on = 0;   // (emulation off)
+    open_now = true, amiibo_tick();
+    opts.amiibo_figure = 1, amiibo_tick();
+    open_now = false, amiibo_tick();
+    CHECK(touches == tc + 1);
+    opts.amiibo_on = 1;
+    open_now = true, amiibo_tick();
+    opts.amiibo_figure = -1, amiibo_tick();   // (none chosen)
+    open_now = false, amiibo_tick();
+    CHECK(touches == tc + 1);
+    status = -1;
+
     // a saved ID the catalogue does not have: none chosen, the ID kept for a catalogue that has it
     start(0, "ffffffffffffffff");
     CHECK(opts.amiibo_figure == -1 && !strcmp(opts.amiibo_id, "ffffffffffffffff") && selected_id.empty());
@@ -252,6 +303,7 @@ def main():
     card = between(menu, "// ---- (longshot) the Amiibo tab's figure card", "void draw_options(ui::Ctx& c) {")
     for st, line in STATUS.items():
         need('"%s"' % line in card, "the card has no status line %r" % line)
+    need('"Amiibo emulation is off"' in card, "the card's status line with emulation off")
     need('"No amiibo catalogue: build again with Download amiibo ticked."' in card, "the card's no-catalogue line")
     need("ui::picture_make(" in card and "ui::picture_drop(" in card, "the picture's texture is not made and let go")
     need("ui::kAccent" in card and "ui::kDim" in card, "the card's glow or silhouette")
@@ -269,6 +321,7 @@ def main():
     code = code.replace("/* CATALOGUE */", between(menu, "// ---- (longshot) the Amiibo tab's catalogue", "const char* const kFpsDevLineHelp"))
     code = code.replace("/* ROWS */", table)
     code = code.replace("/* LOGIC */", logic)
+    code = code.replace("/* STATUS LINE */", block(menu, "const char* amiibo_status_line(int st) {"))
     with tempfile.TemporaryDirectory(prefix="amiibo-menu-") as tmp:
         tmp = Path(tmp)
         catalogue(tmp / "game" / "amiibo")

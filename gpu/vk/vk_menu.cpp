@@ -3126,6 +3126,9 @@ int amiibo_sent_config[3] = {-1, -1, -1};
 std::string amiibo_sent_id = "-";   // (the figure amiibo_select was last given, its id_hex, "" none; "-": nothing sent yet)
 int amiibo_rows_series = -1;        // (the series the Figure row's range is for)
 int amiibo_fig_at = -1;             // (the catalogue's place of the figure opts.amiibo_id was last set from, -1 none)
+bool amiibo_was_open = false;       // (the menu open at the last amiibo_tick)
+std::string amiibo_open_id;         // (the figure sent when the menu last opened, its id_hex)
+int amiibo_state();
 /// The catalogue's place of the figure the Figure row is on, -1 none
 int amiibo_at_now() {
     const std::vector<int> shown = amiibo_shown(opts.amiibo_series);
@@ -3179,6 +3182,15 @@ void amiibo_tick() {
         host->amiibo_select(at >= 0 ? amiibo_figs[at].id : nullptr, at >= 0 ? amiibo_figs[at].name.c_str() : nullptr);
         amiibo_sent_id = id;
     }
+    // (Touch when the game asks touches only when the game starts looking: a figure picked while it already looks would wait
+    // for the next search. So when the menu closes, the game still looking and the figure another than the one the menu
+    // opened on, it is touched then: once, not at each step of the Figure row on the way)
+    const bool open = open_now.load(std::memory_order_relaxed);
+    if (open && !amiibo_was_open) amiibo_open_id = amiibo_sent_id;
+    if (!open && amiibo_was_open && opts.amiibo_on && opts.amiibo_auto && !id.empty() && id != amiibo_open_id &&
+        host && host->amiibo_touch && amiibo_state() == 1)
+        host->amiibo_touch(1);
+    amiibo_was_open = open;
 }
 /// Surprise me: a figure of the shown series at random (another than the one shown, when it has more than one)
 void amiibo_surprise() {
@@ -4071,6 +4083,7 @@ void amiibo_picture_for(int at) {
         amiibo_tex = ui::picture_make(rgba.data(), amiibo_figs[at].w, amiibo_figs[at].h);
 }
 const char* amiibo_status_line(int st) {
+    if (!opts.amiibo_on) return "Amiibo emulation is off";   // (the game finds no reader, whatever the state was)
     return st == 1 ? "The game is looking: touch to use" : st == 2 ? "On the reader" : st == 3 ? "Removed" : st == 4 ? "Read"
                                                                                                          : "Not looking for amiibo";
 }
