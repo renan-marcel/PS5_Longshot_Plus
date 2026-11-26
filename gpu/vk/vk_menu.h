@@ -141,6 +141,15 @@ struct Options {
                           // (vk_menu_i18n.cpp). Saved as menu_language
     int mic = 1;          // (longshot) the ocarina's microphone: 0 Off, 1 the system's default, 2.. a device as host->mic_name lists it (host/nn_audio_in.c)
     int skip_title = 0;   // (longshot) start with the most recent save, pressing through the title and its file list (host/oot_autoload.c); read at the start
+    // (longshot) the Amiibo tab (vk_menu.cpp amiibo_tick, host/amiibo_core.c): the reader on, the Series row's place (0 All), the
+    // Figure row's place in that series' list (-1 none; not saved: the figure is saved by its ID, amiibo_id), a new tag ID at
+    // each read, the figure touched when the game asks
+    int amiibo_on = 1;
+    int amiibo_series = 0;
+    int amiibo_figure = -1;
+    int amiibo_random = 1;
+    int amiibo_auto = 1;
+    char amiibo_id[17] = {};   // (the figure's amiibo ID, 16 hex digits, "" none: saved as amiibo_figure_id=)
 };
 extern Options opts;
 constexpr int kAutoPreset = 6;   // (the Quality preset Auto (this PC): menu_auto_for_gpu, auto_settings.h)

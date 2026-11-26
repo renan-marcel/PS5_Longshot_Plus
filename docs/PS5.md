@@ -34,7 +34,7 @@ ps5/tools/build-ffmpeg.sh
 python3 -I ps5/build.py
 ```
 
-The Python packages are upstream's (`lz4 numpy capstone "unicorn>=2.1,<2.2" zstandard`). The Vulkan, SPIR-V and VMA
+The Python packages are upstream's (`lz4 numpy capstone "unicorn>=2.1,<2.2" zstandard`, and `pillow` for Download amiibo). The Vulkan, SPIR-V and VMA
 headers are upstream's pins (`scripts/linux/deps.sh`) in `.local/ps5-deps/cpm`.
 
 ## What is the PS5's

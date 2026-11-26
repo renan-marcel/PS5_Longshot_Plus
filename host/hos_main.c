@@ -15,6 +15,7 @@
 #include "hos_paths.h"
 #include "game_layout.h"
 #include "options_path.h"
+#include "amiibo_core.h"   /* (the virtual amiibo's folder and event hooks, at start) */
 #include "hos_wide_size.h"   /* (the widescreen picture's size, shared with the Insert menu) */
 #include "../gpu/vk/vk_api.h"
 #include "../gpu/vk/oot_cheat_items.h"
@@ -2084,7 +2085,18 @@ static int game_main(int argc, char **argv) {
     }
     if (!hos_user_dir) hos_user_dir = "user";
     CreateDirectoryA(hos_user_dir, NULL);
-    hos_options_carry();   /* (a game folder's settings from before into the user folder, once: host/options_path.c) */
+    {   /* (the virtual amiibo: its application areas in <user>/amiibo, which the core makes when it first writes one (the user
+           folder is made just above); the game's nn::nfp calls and their events in host/nn_nfp.c) */
+        void hos_nfp_signal(int ev), hos_nfp_clear(int ev), hos_nfp_random(uint8_t *out, size_t n);
+        char amiibo_dir[MAX_PATH];
+        if (snprintf(amiibo_dir, sizeof amiibo_dir, "%s" SEP_S "amiibo", hos_user_dir) < (int)sizeof amiibo_dir)
+            amiibo_set_dir(amiibo_dir);
+        amiibo_set_hooks(hos_nfp_signal, hos_nfp_clear, hos_nfp_random);
+    }
+    hos_options_carry();  /* (a game folder's settings from before into the user folder, once: host/options_path.c) */
+    /* (the Amiibo tab's switches and figure, from the options file, before the game's NfpMgr can ask: the menu sends its
+       own only once it first ticks) */
+    amiibo_load_options(hos_options_file());
     if (!reserve_guest()) {
         fprintf(stderr, "cannot reserve the guest window\n");
         return 1;

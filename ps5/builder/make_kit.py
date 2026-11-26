@@ -194,6 +194,7 @@ Built from PS5_Longshot %s. No part of it comes from a game.
 | lib/libclang_rt.builtins-x86_64.a | LLVM compiler-rt | Apache-2.0 with LLVM exceptions |
 | sdk/, link/, obj/app_crt.o, title/sce_module/libc.prx | ps5-payload-sdk and PS5_Vulkan's platform layer | GPL-3.0 |
 | src/ | Longshot's lifter (nx2), runtime sources (host) and a64-kit | GPL-3.0 |
+| (not in the kit) the amiibo catalogue | AmiiboAPI (N3evin), downloaded on the player's PC at build time with Download amiibo, not shipped | MIT |
 
 The sources are in the PS5_Longshot repository at the revision above and in the projects named.
 """ % (info["revisions"]["PS5_Longshot"][:12], info["revisions"]["PS5_MihawkGen"][:12], info["revisions"]["PS5_Vulkan"][:12]))

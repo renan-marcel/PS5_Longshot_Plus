@@ -74,7 +74,7 @@ MODELS = {
     },
 }
 STEPS = ["Reading the game's program", "Translating it to C", "Compiling for the console", "Linking", "Making the title folder",
-         "Listing the game's shaders", "Extracting the game's data"]
+         "Listing the game's shaders", "Extracting the game's data", "Downloading the amiibo"]
 
 
 class Stop(Exception):
@@ -637,6 +637,12 @@ def check(a):
         if " T check" not in out:
             raise Stop("the compiled check has no function: %s" % out)
     say("clang: compiles for the console (x86_64-sie-ps5, the kit's SDK)")
+    cache = os.path.join(a.work, "amiibo-cache") if a.work else None
+    say("amiibo cache: %s" % ("none (--work not given)" if not cache else
+                              "%s (%s)" % (cache, "there" if os.path.isdir(cache) else "not there yet: Download amiibo fills it")))
+    r = subprocess.run([sys.executable, "-I", "-c", "import PIL; print(PIL.__version__)"], capture_output=True, text=True)
+    say("pillow (Download amiibo): " + ("PIL %s loads" % r.stdout.strip() if not r.returncode else
+                                        "import PIL fails: the amiibo pictures cannot be made on this PC"))
     say("@@done check")
 
 
@@ -672,6 +678,43 @@ def game_data(kit, work, game, app, folder=False):
         (["--folder"] if folder else []), env=env, what="extracting the game's data")
 
 
+def amiibo(kit, work, app, wanted):
+    """(ps5/builder/amiibo.py) the amiibo catalogue and the figures' pictures, downloaded on this PC into <title>/amiibo/
+    (amiibo.idx, figures.pak), only with the option. The download (about 151 MB) is cached in <work>/amiibo-cache, so a
+    second build does not repeat it. Never stops the build: a failure is one warning, and the title keeps the amiibo/ it
+    had (a catalogue from an earlier build, or none). True when amiibo/ was written by this run"""
+    step(8)
+    if not wanted:
+        say("amiibo: skipped (Download amiibo is not on)")
+        return False
+    src, env = python_env(kit, work)
+    idx = os.path.join(app, "amiibo", "amiibo.idx")
+
+    def stamp():   # (amiibo.idx as it is on the disk: amiibo.py replaces it whole when it writes the catalogue, else None)
+        try:
+            st = os.stat(idx)
+        except OSError:
+            return None
+        return st.st_mtime_ns, st.st_size, st.st_ino
+
+    before = stamp()
+    try:
+        run([sys.executable, "-I", "-u", os.path.join(HERE, "amiibo.py"), "--app", app,
+             "--cache", os.path.join(work, "amiibo-cache")], env=env, what="downloading the amiibo")
+        after = stamp()
+        if after is None or after == before:   # (amiibo.py warned and wrote nothing: what is there is an earlier build's)
+            raise Stop("no amiibo/ was written")
+    except (Stop, OSError) as e:
+        why = str(e).splitlines()[0]
+        if before is not None and stamp() is not None:
+            say("warning: the amiibo were not refreshed (%s); the title keeps the catalogue of an earlier build" % why)
+        else:
+            say("warning: the amiibo were not added (%s); the build goes on without them" % why)
+        return False
+    say("amiibo: added to the title folder")
+    return True
+
+
 def build(a):
     kit = find_kit(a.kit)
     info = json.load(open(os.path.join(kit, "kit.json")))
@@ -696,6 +739,7 @@ def build(a):
     app = title(kit, info, work, elf, native, out, a.model, not a.no_known_skips)
     shader_lists(kit, work, a.game, app)
     game_data(kit, work, a.game, app, a.data_folder)
+    amiibo(kit, work, app, a.amiibo)
     say("@@done " + app)
     return app
 
@@ -723,6 +767,9 @@ def main():
                     help="draw the shaders known to hang the GPU (known_gpu_hangs.txt) instead of leaving them out")
     ap.add_argument("--data-folder", action="store_true",
                     help="the game's data as loose files in Data/ (for mods), not packs with an index (the default)")
+    ap.add_argument("--amiibo", action="store_true",
+                    help="download the amiibo catalogue and the figures' pictures (about 42 MB in the title; the download is "
+                    "about 151 MB, once) into the title folder: never share them")
     a = ap.parse_args()
     if not a.check and not (a.game and a.out and a.model):
         ap.error("--game, --out and --model are needed (or --check)")

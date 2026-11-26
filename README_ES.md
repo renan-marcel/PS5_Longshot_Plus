@@ -184,6 +184,10 @@ Descarga el paquete correspondiente a tu arquitectura desde [**Releases (`groovy
 * **Upscaler:** `AMD FSR 3.1` por defecto en todas las PS5, o `AMD FSR 4` automático si copias los pesos `lite/`.
 * **Generación de cuadros:** `2x (game at 30 fps)` activada de serie mediante **FG integrada** (`PS5_MihawkGen`).
 
+### Amiibo
+
+Las recompensas amiibo del juego funcionan con una figura virtual: marca **Download amiibo** en el builder (`--amiibo` en la línea de comandos) y elige una figura en la pestaña **Amiibo** del menú. Los nombres y las imágenes se descargan en tu PC a la carpeta de tu título y nunca se comparten; no hacen falta claves ni volcados. Detalles, filas y límites (en inglés): [docs/amiibo.md](docs/amiibo.md).
+
 ### Controles DualSense por defecto
 
 | Nintendo Switch | DualSense (PS5) |

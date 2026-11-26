@@ -17,6 +17,7 @@
 // started with, and the Graphics tab's help lists them. Closing the menu then asks whether to restart now (menu_restart.h):
 // Later keeps the saved settings for the next start and is not asked again until they change; Restart now saves and
 // closes the window as the player would, and the game starts again (WM_APP + 9: host/hos_relaunch.c).
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -26,6 +27,7 @@
 #include <cstring>
 #include <iterator>
 #include <mutex>
+#include <random>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -36,6 +38,7 @@
 #include "vk_menu.h"
 #include "intel_compiles.h"
 #include "vk_menu_hit.h"
+#include "amiibo_catalogue.h"   // (the Amiibo tab: the figures, their pictures)
 #include "vk_fps.h"    // (the FPS counter's levels and numbers)
 #include "vk_draw.h"   // (pipeline_cache_save: Restart now keeps what was built)
 #include "vk_texture.h"   // (the FPS counter's Dev level: texture_count, texture_bytes, texture_stats)
@@ -99,8 +102,9 @@ enum MenuTab {
     TAB_AUDIO = 1,
     TAB_GAMEPLAY = 2,
     TAB_CONTROLS = 3,
-    TAB_DEBUG = 4,   // (the OoT debug tools of #785, a tab of their own)
-    TAB_COUNT = 5,
+    TAB_AMIIBO = 4,  // (longshot: the virtual amiibo reader, host/amiibo_core.c)
+    TAB_DEBUG = 5,   // (the OoT debug tools of #785, a tab of their own)
+    TAB_COUNT = 6,
     TAB_MOTION = TAB_COUNT,   // (longshot: not a tab of the strip, the Motion page that the Controls tab's Motion row
                               // opens: one past the strip's tabs, so a tab added before TAB_COUNT moves it along)
     TAB_FPS_DEV = TAB_MOTION + 1,   // (longshot: not a tab either, the FPS counter's Dev lines page, from the Gameplay tab)
@@ -1493,6 +1497,40 @@ void text_set(TextField& f, const char* t) {
     f.len = f.caret = (int)strlen(f.text);
 }
 
+// ---- (longshot) the Amiibo tab's catalogue: <game folder>/amiibo, amiibo.idx and figures.pak (amiibo_catalogue.h), read once ----
+// (the Series row: 0 All, then each series, The Legend of Zelda first and the rest by name; the Figure row: a place in the
+// shown series' list, amiibo_shown, -1 none. amiibo_tick below tells the host what the rows say)
+std::vector<amiibo::Figure> amiibo_figs;
+std::vector<std::string> amiibo_series_names;   // (the Series row's 1.., amiibo_series_names[v - 1])
+bool amiibo_read = false;
+void amiibo_load() {
+    if (amiibo_read) return;
+    amiibo_read = true;
+    amiibo::load(game_folder_path() + "amiibo", amiibo_figs);   // (game_folder_path ends with its separator)
+    for (const amiibo::Figure& f : amiibo_figs)
+        if (!f.series.empty() && std::find(amiibo_series_names.begin(), amiibo_series_names.end(), f.series) == amiibo_series_names.end())
+            amiibo_series_names.push_back(f.series);
+    std::sort(amiibo_series_names.begin(), amiibo_series_names.end(), [](const std::string& a, const std::string& b) {
+        const bool za = a == "The Legend of Zelda", zb = b == "The Legend of Zelda";
+        return za != zb ? za : a < b;
+    });
+}
+/// The catalogue's places of the figures the Series row shows, in file order (series 0: all of them)
+std::vector<int> amiibo_shown(int series) {
+    std::vector<int> v;
+    const std::string* want = series >= 1 && series <= (int)amiibo_series_names.size() ? &amiibo_series_names[series - 1] : nullptr;
+    for (int i = 0; i < (int)amiibo_figs.size(); i++)
+        if (!want || amiibo_figs[i].series == *want) v.push_back(i);
+    return v;
+}
+const char* tx_amiibo_series(int v) {
+    return v >= 1 && v <= (int)amiibo_series_names.size() ? amiibo_series_names[v - 1].c_str() : "All";
+}
+const char* tx_amiibo_figure(int v) {
+    const std::vector<int> shown = amiibo_shown(opts.amiibo_series);
+    return v >= 0 && v < (int)shown.size() ? amiibo_figs[shown[v]].name.c_str() : "None";
+}
+
 const char* const kFpsDevLineHelp = "Whether the FPS counter's Dev level shows this line.";   // (the details page's rows)
 Row rows[] = {
     // Graphics, in sections: a heading row is a section's title (draw_options draws it, the selection steps over it). The
@@ -1752,6 +1790,27 @@ Row rows[] = {
      "Which key switches between the full menu and the compact bar (or opens directly to the compact bar when held "
      "with the menu shortcut).",
      nullptr, false, true},
+    // (longshot) Amiibo: the host's virtual amiibo reader (host/amiibo_core.c) and the figures the builder downloads
+    // (amiibo_catalogue.h). amiibo_tick tells the host what the rows say; the figure card beside them: amiibo_card
+    {TAB_AMIIBO, "Amiibo emulation", &opts.amiibo_on, 0, 1, 1, tx_onoff,
+     "The game finds an amiibo reader and reads the figure chosen below. Off: the game finds no reader, as on a Switch "
+     "without one.", nullptr, false, true},
+    {TAB_AMIIBO, "Series", &opts.amiibo_series, 0, 0, 1, tx_amiibo_series,
+     "Which series the Figure row lists: All, or one series. The Legend of Zelda comes first.", nullptr, false, true},
+    {TAB_AMIIBO, "Figure", &opts.amiibo_figure, -1, -1, 1, tx_amiibo_figure,
+     "The figure the game reads when it asks for an amiibo. Left and Right choose; its picture is beside the list.",
+     nullptr, false, true},
+    {TAB_AMIIBO, "Surprise me", nullptr, 0, 0, 0, nullptr,
+     "Picks a figure of the series at random."},
+    {TAB_AMIIBO, "Random tag ID", &opts.amiibo_random, 0, 1, 1, tx_onoff,
+     "Each read is a new figure with a tag ID of its own, so the game lets the same figure be used again. Off: the figure "
+     "keeps one ID.", nullptr, false, true},
+    {TAB_AMIIBO, "Touch when the game asks", &opts.amiibo_auto, 0, 1, 1, tx_onoff,
+     "The figure is put on the reader as soon as the game looks for one, and taken off when the game stops looking.",
+     nullptr, false, true},
+    {TAB_AMIIBO, "Touch / Remove", nullptr, 0, 0, 0, nullptr,
+     "Puts the figure on the reader, or takes it off: for a game that asks you to remove the figure, or with Touch when the "
+     "game asks off."},
     // Debug: the tools' switch, the tools themselves below it while they are on (cheat: menu_tick does what they do), then the
     // developer's rows
     {TAB_DEBUG, "Debug tools", &opts.debug_tools, 0, 1, 1, tx_onoff,
@@ -2373,6 +2432,7 @@ void save() {
             mine |= key == "vram_budget";
             mine |= key == "gpu_device_id";   // (the GPU device row's card: written below)
             mine |= key == "gpu_skip";        // (the Debug tab's skipped shaders: written below)
+            mine |= key == "amiibo_figure_id";   // (the Amiibo tab's figure, by its ID: written below)
             for (const Row& r : rows)
                 if (!mine && r.value && key == ini_key(r)) mine = true;
             if (!mine) others += line, others += others.back() == '\n' ? "" : "\n";
@@ -2390,7 +2450,8 @@ void save() {
                 // ultrawide= is kept, unless the row was changed in the menu)
                 const int v = saved_value(r.value);
                 fprintf(f, "%s=%d\n", ini_key(r), env_holds(&opts.output_res) && v == aspect_started ? ultrawide_read : aspect_follows_host(v) ? 1 : 0);
-            } else if (r.value && r.value != &opts.game_lang && r.value != &output_pick) { // The device is saved by ID below.
+            } else if (r.value && r.value != &opts.game_lang && r.value != &output_pick && r.value != &opts.amiibo_figure) {
+                // (the device and the amiibo figure are saved by their IDs below: a place in a list moves when the list does)
                 fprintf(f, "%s=%d\n", ini_key(r), saved_value(r.value));
             }
         }
@@ -2407,6 +2468,7 @@ void save() {
                                  : opts.gpu_device == 0 && gpu_card_missing ? gpu_saved_card : std::string();
         if (!card.empty()) fprintf(f, "gpu_device_id=%s\n", card.c_str());
         if (gpu_skip::count.load(std::memory_order_acquire)) fprintf(f, "gpu_skip=%s\n", gpu_skip::to_text().c_str());
+        if (opts.amiibo_id[0]) fprintf(f, "amiibo_figure_id=%s\n", opts.amiibo_id);   // (the Figure row's figure: amiibo_tick)
         if (auto_for) fprintf(f, "auto_for=%016llx\n", (unsigned long long)auto_for);   // (the hardware Auto (this PC) chose for)
         if (auto_tuned) fprintf(f, "auto_tuned=%016llx\n", (unsigned long long)auto_tuned);   // (and measured in play for)
         // (the tuning's steps so far and whether one went down: the no-seesaw rule and the two steps hold across restarts)
@@ -3053,6 +3115,113 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
         restart_state.note(now);
     }
     if (keep) save();
+}
+
+// ---- (longshot) the Amiibo tab: what its rows say, told to the host's virtual reader (MkwVkHost.amiibo_*, host/amiibo_core.c) ----
+// amiibo_tick (menu_tick, each frame, and menu_init once the file is read) sends what changed since it last sent: the three
+// switches to amiibo_config, the figure to amiibo_select. So a change from the arrows, the mouse, Surprise me or the control
+// bridge alike reaches the host, and the host knows the figure even when the tab is never opened. (The core runs its hooks
+// after letting its lock go: calling it from the menu's thread is safe.) A host from before has none of the four: nothing sent
+int amiibo_sent_config[3] = {-1, -1, -1};
+std::string amiibo_sent_id = "-";   // (the figure amiibo_select was last given, its id_hex, "" none; "-": nothing sent yet)
+int amiibo_rows_series = -1;        // (the series the Figure row's range is for)
+int amiibo_fig_at = -1;             // (the catalogue's place of the figure opts.amiibo_id was last set from, -1 none)
+bool amiibo_was_open = false;       // (the menu open at the last amiibo_tick)
+std::string amiibo_open_id;         // (the figure sent when the menu last opened, its id_hex)
+int amiibo_state();
+/// The catalogue's place of the figure the Figure row is on, -1 none
+int amiibo_at_now() {
+    const std::vector<int> shown = amiibo_shown(opts.amiibo_series);
+    return opts.amiibo_figure >= 0 && opts.amiibo_figure < (int)shown.size() ? shown[opts.amiibo_figure] : -1;
+}
+/// The Series and Figure rows' ranges: the catalogue's series, the shown series' figures (none: -1 only)
+void amiibo_rows_sync() {
+    const int n = (int)amiibo_shown(opts.amiibo_series).size();
+    for (Row& r : rows) {
+        if (r.value == &opts.amiibo_series) r.lo = 0, r.hi = (int)amiibo_series_names.size();
+        if (r.value == &opts.amiibo_figure) r.lo = n ? 0 : -1, r.hi = n - 1;
+    }
+    if (opts.amiibo_figure >= n) opts.amiibo_figure = n - 1;   // (-1, none, stays)
+    amiibo_rows_series = opts.amiibo_series;
+}
+/// (menu_init, after the file) The saved figure (amiibo_figure_id=, by its ID: mkwvk::amiibo::find) found in the catalogue:
+/// the Figure row on it, in the saved series when it is one of that series' figures, else under All. Not in the catalogue:
+/// none, and the ID kept for a catalogue that has it
+void amiibo_restore() {
+    amiibo_load();
+    opts.amiibo_series = std::clamp(opts.amiibo_series, 0, (int)amiibo_series_names.size());
+    opts.amiibo_figure = -1;
+    const int at = opts.amiibo_id[0] ? amiibo::find(amiibo_figs, opts.amiibo_id) : -1;
+    for (int pass = 0; at >= 0 && pass < 2 && opts.amiibo_figure < 0; pass++) {
+        if (pass) opts.amiibo_series = 0;
+        const std::vector<int> shown = amiibo_shown(opts.amiibo_series);
+        const auto it = std::find(shown.begin(), shown.end(), at);
+        if (it != shown.end()) opts.amiibo_figure = (int)(it - shown.begin());
+    }
+    amiibo_fig_at = opts.amiibo_figure >= 0 ? at : -1;
+    amiibo_rows_sync();
+}
+void amiibo_tick() {
+    if (opts.amiibo_series != amiibo_rows_series) {   // (another series: the Figure row on its first figure)
+        amiibo_rows_sync();
+        opts.amiibo_figure = amiibo_shown(opts.amiibo_series).empty() ? -1 : 0;
+    }
+    const int config[3] = {opts.amiibo_on, opts.amiibo_random, opts.amiibo_auto};
+    if (host && host->amiibo_config && memcmp(config, amiibo_sent_config, sizeof config)) {
+        host->amiibo_config(config[0], config[1], config[2]);
+        memcpy(amiibo_sent_config, config, sizeof config);
+    }
+    const int at = amiibo_at_now();
+    if (at != amiibo_fig_at) {   // (the player chose another figure: saved by its ID)
+        amiibo_fig_at = at;
+        snprintf(opts.amiibo_id, sizeof opts.amiibo_id, "%s", at >= 0 ? amiibo::id_hex(amiibo_figs[at].id).c_str() : "");
+        save();
+    }
+    const std::string id = at >= 0 ? amiibo::id_hex(amiibo_figs[at].id) : std::string();
+    if (host && host->amiibo_select && id != amiibo_sent_id) {
+        host->amiibo_select(at >= 0 ? amiibo_figs[at].id : nullptr, at >= 0 ? amiibo_figs[at].name.c_str() : nullptr);
+        amiibo_sent_id = id;
+    }
+    // (Touch when the game asks touches only when the game starts looking: a figure picked while it already looks would wait
+    // for the next search. So when the menu closes, the game still looking and the figure another than the one the menu
+    // opened on, it is touched then: once, not at each step of the Figure row on the way)
+    const bool open = open_now.load(std::memory_order_relaxed);
+    if (open && !amiibo_was_open) amiibo_open_id = amiibo_sent_id;
+    if (!open && amiibo_was_open && opts.amiibo_on && opts.amiibo_auto && !id.empty() && id != amiibo_open_id &&
+        host && host->amiibo_touch && amiibo_state() == 1)
+        host->amiibo_touch(1);
+    amiibo_was_open = open;
+}
+/// Surprise me: a figure of the shown series at random (another than the one shown, when it has more than one)
+void amiibo_surprise() {
+    const int n = (int)amiibo_shown(opts.amiibo_series).size();
+    if (n <= 0) return;
+    static std::mt19937 rng((uint32_t)std::chrono::steady_clock::now().time_since_epoch().count());
+    const bool other = n > 1 && opts.amiibo_figure >= 0 && opts.amiibo_figure < n;
+    int v = std::uniform_int_distribution<int>(0, other ? n - 2 : n - 1)(rng);
+    if (other && v >= opts.amiibo_figure) v++;
+    opts.amiibo_figure = v;
+    amiibo_tick();
+}
+/// The reader's state (host/amiibo_core.h AMIIBO_STATE_*): -1 before the game's Initialize (or an older host), 0 Initialized,
+/// 1 looking for a tag, 2 a tag on it, 3 removed, 4 mounted (read), 5 unavailable, 6 finalized
+int amiibo_state() { return host && host->amiibo_status ? host->amiibo_status() : -1; }
+bool amiibo_on_reader(int st) { return st == 2 || st == 4; }
+bool is_amiibo_action(const Row& r) { return !r.value && r.tab == TAB_AMIIBO; }
+/// The value cell of Surprise me and Touch / Remove, and their prompt
+const char* amiibo_action_text(const Row& r) {
+    if (!strcmp(r.name, "Surprise me")) return "Pick";
+    return amiibo_on_reader(amiibo_state()) ? "Remove" : "Touch";
+}
+/// Enter or A on Surprise me or Touch / Remove (menu_tick's confirm presses): done, true; any other row, false
+bool amiibo_press(const Row& r) {
+    if (!is_amiibo_action(r)) return false;
+    if (!strcmp(r.name, "Surprise me")) amiibo_surprise();
+    else if (host && host->amiibo_touch) {
+        const int st = amiibo_state();
+        host->amiibo_touch(st != 2 && st != 4);   // (on the reader or read: take it off; else put it on)
+    }
+    return true;
 }
 
 // ---- (longshot) the rows that are text fields (text_edit): their fields, what Enter on each sets, the one being edited ----
@@ -3855,7 +4024,7 @@ const char* bug_report_hint() {
     return text.c_str();
 }
 
-const char* const tab_titles[TAB_COUNT] = {"Graphics", "Audio", "Gameplay", "Controls", "Debug"};
+const char* const tab_titles[TAB_COUNT] = {"Graphics", "Audio", "Gameplay", "Controls", "Amiibo", "Debug"};
 inline const char* tab_title(int t) { return t >= 0 && t < TAB_COUNT ? tab_titles[t] : "Settings"; }
 inline bool cheat_is_toggle(int c) { return c == 0 || c == 1 || c == 7; }
 
@@ -3877,6 +4046,7 @@ void row_value_cell(ui::Ctx& c, const Row& r, ImVec2 va, ImVec2 vb, bool selecte
         if (pending == &r) choice_cell(c, va, vb, "Press again to confirm", selected, false, false);
         else if (is_share_row(r)) choice_cell(c, va, vb, share_value.empty() ? "Save" : share_value, selected, false, false);   // (an action, not a page)
         else if (&r == &rows[kBugReportRow]) choice_cell(c, va, vb, bug_report_cell(), selected, false, false);   // (how the last report went)
+        else if (is_amiibo_action(r)) choice_cell(c, va, vb, amiibo_action_text(r), selected, false, false);   // (an action, not a page)
         else {
             choice_cell(c, va, vb, "", selected, false, false);
             ui::triangle(c, ImVec2(vb.x - 15 * s, mid), 10 * s, 1, selected ? ui::kGoldInk : ui::kInk);
@@ -3897,6 +4067,74 @@ void row_value_cell(ui::Ctx& c, const Row& r, ImVec2 va, ImVec2 vb, bool selecte
             choice_cell(c, va, vb, r.text(*r.value), selected, left, right, fixed);
         }
     }
+}
+
+// ---- (longshot) the Amiibo tab's figure card, at the top of the help column: the picture (or a silhouette), the figure's name,
+// series and ID, and what the reader is doing; on the reader, its edge in the menu's accent. The picture's texture is made
+// while the card shows it (the tab open) and let go when the figure changes (ui::picture_make, picture_drop: vk_imgui.cpp)
+ImTextureData* amiibo_tex = nullptr;
+int amiibo_tex_at = -2;   // (the catalogue's place the texture is for, -1 none; -2 none made yet)
+void amiibo_picture_for(int at) {
+    if (at == amiibo_tex_at) return;
+    amiibo_tex_at = at;
+    if (amiibo_tex) ui::picture_drop(amiibo_tex), amiibo_tex = nullptr;
+    std::vector<uint8_t> rgba;   // (none, or one that does not read: the silhouette)
+    if (at >= 0 && amiibo::picture(game_folder_path() + "amiibo", amiibo_figs[at], rgba))
+        amiibo_tex = ui::picture_make(rgba.data(), amiibo_figs[at].w, amiibo_figs[at].h);
+}
+const char* amiibo_status_line(int st) {
+    if (!opts.amiibo_on) return "Amiibo emulation is off";   // (the game finds no reader, whatever the state was)
+    return st == 1 ? "The game is looking: touch to use" : st == 2 ? "On the reader" : st == 3 ? "Removed" : st == 4 ? "Read"
+                                                                                                         : "Not looking for amiibo";
+}
+/// The card from y0 between x0 and x1: its foot
+float amiibo_card(ui::Ctx& c, float x0, float x1, float y0) {
+    const float s = c.s, pad = 18 * s;
+    if (amiibo_figs.empty()) {
+        const char* t = "No amiibo catalogue: build again with Download amiibo ticked.";
+        const float h = ui::para(c, c.f.body, 18 * s, ImVec2(), 0, t, x1 - x0 - 2 * pad, false), y1 = y0 + h + 2 * pad;
+        ui::box(c, ImVec2(x0, y0), ImVec2(x1, y1));
+        ui::para(c, c.f.body, 18 * s, ImVec2(x0 + pad, y0 + pad), ui::kInk, t, x1 - x0 - 2 * pad);
+        return y1;
+    }
+    const int at = amiibo_at_now(), st = amiibo_state();
+    amiibo_picture_for(at);
+    const float ph = 150 * s, pw = ph * 0.8f, y1 = y0 + ph + 2 * pad;   // (the pictures are at most 144x180)
+    ui::box(c, ImVec2(x0, y0), ImVec2(x1, y1));
+    if (amiibo_on_reader(st)) {   // (a glow: the accent, fading outwards)
+        for (int i = 3; i >= 1; i--)
+            c.d->AddRect(ImVec2(x0 - 2.0f * i * s, y0 - 2.0f * i * s), ImVec2(x1 + 2.0f * i * s, y1 + 2.0f * i * s),
+                         ui::alpha(ui::kAccent, 0.14f * (4 - i)), 3 * s, 0, 2 * s);
+        c.d->AddRect(ImVec2(x0, y0), ImVec2(x1, y1), ui::kAccent, 0, 0, 2 * s);
+    }
+    const ImVec2 pa(x0 + pad, y0 + pad), pb(x0 + pad + pw, y0 + pad + ph);
+    if (amiibo_tex) {   // (whole, in its own shape, in the middle of its place)
+        const amiibo::Figure& f = amiibo_figs[at];
+        const float k = std::min(pw / f.w, ph / f.h), w = f.w * k, h = f.h * k;
+        const ImVec2 a(pa.x + (pw - w) * 0.5f, pa.y + (ph - h) * 0.5f);
+        c.d->AddImage(amiibo_tex->GetTexRef(), a, ImVec2(a.x + w, a.y + h));
+    } else {   // (a silhouette: a figure's rounded body on its stand)
+        const ImU32 dim = ui::alpha(ui::kDim, 0.45f);
+        c.d->AddRectFilled(ImVec2(pa.x + pw * 0.22f, pa.y + ph * 0.06f), ImVec2(pb.x - pw * 0.22f, pb.y - ph * 0.18f), dim, pw * 0.28f);
+        c.d->AddRectFilled(ImVec2(pa.x + pw * 0.06f, pb.y - ph * 0.14f), ImVec2(pb.x - pw * 0.06f, pb.y), dim, 6 * s);
+    }
+    const float tx = pb.x + pad, room = x1 - pad - tx;
+    if (room > 40 * s) {
+        const amiibo::Figure* f = at >= 0 ? &amiibo_figs[at] : nullptr;
+        float y = y0 + pad;
+        ui::text(c, c.f.heading, 21 * s, ImVec2(tx, y), ui::kInkBright, fit(c, c.f.heading, 21 * s, room, f ? f->name : "No figure", false).c_str());
+        y += 32 * s;
+        if (f) {
+            ui::text(c, c.f.body, 17 * s, ImVec2(tx, y), ui::kSoft, fit(c, c.f.body, 17 * s, room, f->series, false).c_str());
+            y += 26 * s;
+            ui::text(c, c.f.body, 15 * s, ImVec2(tx, y), ui::kDim, ("ID " + amiibo::id_hex(f->id)).c_str());
+        }
+        const float sy = y1 - pad - 10 * s;
+        const ImU32 col = amiibo_on_reader(st) ? ui::kAccent : ui::kInk;
+        ui::diamond(c, ImVec2(tx + 5 * s, sy), 4 * s, col);
+        ui::text_mid(c, c.f.strong, 16 * s, tx + 18 * s, sy, col, fit(c, c.f.strong, 16 * s, room - 18 * s, amiibo_status_line(st), false).c_str());
+    }
+    return y1;
 }
 
 void draw_options(ui::Ctx& c) {
@@ -3967,6 +4205,9 @@ void draw_options(ui::Ctx& c) {
     if (is_share_row(selr) && !share_said.empty()) hint = share_said.c_str();   // (what the last save did)
     if (is_freeze_row(selr) || is_skipped_row(selr)) hint = freeze_hint(selr);   // (which shader, and whether it is left out)
     if (&selr == &rows[kBugReportRow]) hint = bug_report_hint();   // (the Bug report: where it was saved, or why not)
+    // (longshot: the Amiibo tab's figure card above the help; on a narrow window no room for it, the reader's state in the hint)
+    const float amiibo_foot = cur_tab == TAB_AMIIBO && !narrow ? amiibo_card(c, hx0, hx1, hh + 26 * s) + 16 * s : 0;
+    if (cur_tab == TAB_AMIIBO && narrow && !hint) hint = amiibo_figs.empty() ? "No amiibo catalogue: build again with Download amiibo ticked." : amiibo_status_line(amiibo_state());
     const std::string pending_line = (cur_tab == TAB_GRAPHICS || cur_tab == TAB_DEBUG) && restart_pending() ? restart_line(c, 16 * s, hx1 - hx0 - 66 * s) : "";
     static float help_tall = 0, help_tall_w = 0;
     static std::string help_said;   // (Save my pipeline list's line as measured: measured again when it changes)
@@ -3998,7 +4239,8 @@ void draw_options(ui::Ctx& c) {
             if (const char* says = cheat_confirm(selr.cheat)) prompt_list[prompts_n++] = {ui::kConfirm, says};
             prompt_list[prompts_n++] = {ui::kCompact, "Compact", compact_key_name};
         } else {
-            prompt_list[prompts_n++] = {ui::kConfirm, confirms ? (pending == &selr ? "Confirm" : selr.name) : &selr == &rows[kBugReportRow] || is_share_row(selr) ? "Save" : "Open"};
+            prompt_list[prompts_n++] = {ui::kConfirm, confirms ? (pending == &selr ? "Confirm" : selr.name) : is_amiibo_action(selr) ? amiibo_action_text(selr) :
+                                                      &selr == &rows[kBugReportRow] || is_share_row(selr) ? "Save" : "Open"};
         }
         if (cur_tab == TAB_MOTION || cur_tab == TAB_FPS_DEV) prompt_list[prompts_n++] = {ui::kBack, "Back"};   // (Esc: to Controls, or Gameplay)
         else {
@@ -4015,8 +4257,8 @@ void draw_options(ui::Ctx& c) {
         help_box(c, hx0, hx1, bottom + 8 * s, selr.name, selr.help, hint, pending_line.empty() ? nullptr : pending_line.c_str(), help_tall,
                  after, bottom + 8 * s, bar_top - 10 * s);
     } else {
-        help_box(c, hx0, hx1, std::max(hh + 26 * s, c.h * 0.30f), selr.name, selr.help, hint,
-                 pending_line.empty() ? nullptr : pending_line.c_str(), help_tall, after, hh + 18 * s, bar_top - 12 * s);
+        help_box(c, hx0, hx1, std::max({hh + 26 * s, c.h * 0.30f, amiibo_foot}), selr.name, selr.help, hint,
+                 pending_line.empty() ? nullptr : pending_line.c_str(), help_tall, after, std::max(hh + 18 * s, amiibo_foot), bar_top - 12 * s);
     }
     const float rh = 40 * s, pitch = 48 * s, top = hh + 24 * s, rx0 = cx0 + 44 * s, rx1 = cx1 - 44 * s, split = rx0 + (rx1 - rx0) * 0.55f;
     if (cur_tab == TAB_DEBUG) {   // (the Debug tab: its own layout of the same rows)
@@ -5238,6 +5480,8 @@ void menu_init() {
         const char* hearts = getenv("HOS_OOT_PROTECT_HEARTS");
         protect_hearts.store(hearts && !strcmp(hearts, "1"));
     }
+    amiibo_load();        // (longshot: the Amiibo tab's catalogue first, so the file's series= falls in the Series row's range)
+    amiibo_rows_sync();
     if (FILE* f = fopen(ini_path().c_str(), "r")) {
         char line[4096]; // Endpoint IDs are opaque and must not be cut into multiple settings.
         bool has_resolution = false;
@@ -5258,7 +5502,7 @@ void menu_init() {
             // folder before the game ever started: still a first start, so Auto (this PC) chooses as it would with no file)
             has_options |= strcmp(line, "compile_shaders") != 0;
             for (Row& r : rows) {
-                if (!r.value || r.value == &opts.game_lang || strcmp(line, ini_key(r))) continue;
+                if (!r.value || r.value == &opts.game_lang || r.value == &opts.amiibo_figure || strcmp(line, ini_key(r))) continue;
                 const int v = atoi(eq + 1);
                 *r.value = r.value == &opts.output_res ? parse_output(eq + 1) : std::min(std::max(v, r.lo), r.hi);
             }
@@ -5281,6 +5525,8 @@ void menu_init() {
             if (!strcmp(line, "auto_for")) auto_for = strtoull(eq + 1, nullptr, 16);
             if (!strcmp(line, "gpu_device_id")) gpu_saved_card.assign(eq + 1, strcspn(eq + 1, " \t\r\n"));   // (menu_set_gpu_count)
             if (!strcmp(line, "gpu_skip")) gpu_skip::from_text(eq + 1);   // (the Debug tab's skipped shaders, gpu_skip.h)
+            if (!strcmp(line, "amiibo_figure_id"))   // (the Amiibo tab's figure by its ID: found in the catalogue by amiibo_restore)
+                snprintf(opts.amiibo_id, sizeof opts.amiibo_id, "%.*s", (int)strcspn(eq + 1, " \t\r\n"), eq + 1);
             if (!strcmp(line, "auto_tuned")) auto_tuned = strtoull(eq + 1, nullptr, 16);
             if (!strcmp(line, "auto_steps")) {
                 int steps = 0, down = 0;
@@ -5379,6 +5625,8 @@ void menu_init() {
     }
     outputs_sync();   // (the Aspect ratio follows the size read)
     restart_init();   // (what this run started with: the rows that take a restart differ from it once changed)
+    amiibo_restore();   // (longshot: the saved figure, by its ID; then the host told the switches and the figure)
+    amiibo_tick();
 }
 
 /// (longshot) The Quality preset "Auto (this PC)", once the card is chosen (vk_main.cpp pick_device): the profile auto_settings.h
@@ -5684,7 +5932,7 @@ void menu_option_set(int id, int value) {
 // its own thread: menu_mu keeps them apart from menu_tick (the present's thread) and from menu_option_set (the game's)
 bool bridge_row(int i) { return rows[i].value && !rows[i].heading && rows[i].cheat < 0 && row_shown(i); }
 void bridge_fill(int i, MkwVkSetting* out) {
-    static const char* const tabs[] = {"graphics", "audio", "gameplay", "controls", "debug", "motion", "gameplay", "controls"};
+    static const char* const tabs[] = {"graphics", "audio", "gameplay", "controls", "amiibo", "debug", "motion", "gameplay", "controls"};
     static_assert(sizeof tabs / sizeof tabs[0] == TAB_PAGE + 1, "a name for each MenuTab");
     const Row& r = rows[i];
     *out = MkwVkSetting{};
@@ -6000,6 +6248,7 @@ void menu_tick() {
     share_finish();   // (Save my pipeline list's worker, done)
     fullscreen_tick();
     game_lang_tick();
+    amiibo_tick();   // (longshot: what the Amiibo tab's rows say, to the host, when it changed)
     outputs_follow_screen();
     enum { K_N = 18 };
     static bool held[K_N];
@@ -6535,6 +6784,7 @@ void menu_tick() {
             press[7] = false, changed = true;
         }
         else if (press[7] && &r == &rows[kBugReportRow]) bug_report_save(), press[7] = false, changed = true;
+        else if (press[7] && amiibo_press(r)) press[7] = false, changed = true;   // (Surprise me, Touch / Remove)
         else if (const FieldRow* f = press[7] ? field_row(r) : nullptr) edit_start(*f->field, f->apply), changed = true;   // (longshot)
         else if (press[7] && !r.value && can_bind()) page = 1, csel = 0, ccol = menu_hit::kCtlPrimary, changed = true;
         if ((press[3] || press[4] || press[7]) && r.value) {   // (Enter, or A, as Right)

@@ -9,3 +9,4 @@
 #
 # key              kind     where it stops the GPU                                     seen
 53fcaee4dc45c6ee   compute  the Monster Coliseum after ~30 s, and a cutscene (RDNA 2)   2026-11-24, base PS5, twice in the cutscene
+02a3a0b9823e14ce   compute  early in play, scene not recorded (~3 min in, 5.1 GB free)   2026-11-26, base PS5, once

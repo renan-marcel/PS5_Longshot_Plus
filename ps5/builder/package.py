@@ -43,7 +43,7 @@ DOWNLOADS = {   # name: (url, sha256)
     "appimagetool": ("https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage", "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"),
 }
 # (what the lifter imports, requirements.txt's pins, and the window)
-PACKAGES = ["lz4==4.4.5", "numpy==2.5.4", "capstone==5.0.9", "unicorn==2.1.4", "zstandard==0.25.0", "PyQt6==6.12.1"]
+PACKAGES = ["lz4==4.4.5", "numpy==2.5.4", "capstone==5.0.9", "unicorn==2.1.4", "zstandard==0.25.0", "PyQt6==6.12.1", "pillow==13.0.0"]
 LLVM_KEEP = {
     "linux-x64": ["bin/clang-23", "bin/clang", "bin/lld", "bin/ld.lld", "bin/llvm-nm", "lib/libclang-cpp.so.23.1",
                   "lib/libLLVM.so.23.1", "lib/clang/23/include", "LICENSE.TXT"],
@@ -66,6 +66,8 @@ Builds the PlayStation 5 title folder of PS5 Longshot Plus from your own copy of
 3. Copy the folder it makes (PPSA99198) to /data/homebrew on the console, or send it from the window over FTP.
    Your game file goes to /data/longshotplus/roms on the console.
 
+Download amiibo (optional) fetches the amiibo catalogue and the figures' pictures onto this PC, into the folder it makes.
+Do not share them.
 The folder it makes comes from your game: never share it. This builder holds no game files.
 What the builder is made of, and the licences: kit/NOTICE.md and LICENSE.
 Without a window: %(start)s --cli --game <file> --out <folder> --model base|pro
@@ -261,7 +263,7 @@ def stage(system, a):
 
     # ---- the window, the build, the kit, the system's own programs ----
     os.makedirs(os.path.join(top, "app"))
-    for f in ("app.py", "pipeline.py", "shader_lists.py", "game_data.py", "data_packs.py", "asset_deps.py", "known_gpu_hangs.txt"):
+    for f in ("app.py", "pipeline.py", "shader_lists.py", "game_data.py", "amiibo.py", "data_packs.py", "asset_deps.py", "known_gpu_hangs.txt"):
         shutil.copy2(os.path.join(HERE, f), os.path.join(top, "app", f))
     shutil.copy2(os.path.join(ROOT, "ps5", "sce_sys", "icon0.png"), os.path.join(top, "app", "longshot.png"))
     shutil.copytree(a.kit, os.path.join(top, "kit"))

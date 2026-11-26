@@ -38,6 +38,7 @@ bool srgb_target = false;   // (those views are sRGB: the window's surface lists
 Fonts fonts_;
 ImTextureData* logo_ = nullptr;
 float logo_aspect = 1;
+std::vector<ImTextureData*> pictures_dropped;   // (picture_drop's, until the backend has let them go: begin)
 int64_t presents = 0;   // (frames recorded: when a texture or a staging buffer let go can be destroyed)
 
 PFN_vkVoidFunction load(const char* name, void*) {
@@ -464,6 +465,15 @@ bool begin(uint32_t w, uint32_t h) {
     script_fonts(i18n::lang_code());   // (the menu's language's letters: merged in once, before the frame)
     ImGui_ImplVulkan_NewFrame();
     ImGui::NewFrame();
+    // (the pictures let go: once update_texture has destroyed them (after the frames that drew them), out of ImGui's list and
+    // freed. NewFrame turned the ones dropped since into WantDestroy, or Destroyed when they never reached the backend)
+    for (size_t i = 0; i < pictures_dropped.size();) {
+        ImTextureData* tex = pictures_dropped[i];
+        if (tex->Status != ImTextureStatus_Destroyed) { i++; continue; }
+        ImGui::UnregisterUserTexture(tex);
+        IM_DELETE(tex);
+        pictures_dropped.erase(pictures_dropped.begin() + (std::ptrdiff_t)i);
+    }
     bake_some();
     return true;
 }
@@ -481,6 +491,21 @@ void prebake(const float* px, int n) {
 ImTextureData* logo(float* aspect) {
     *aspect = logo_aspect;
     return logo_;
+}
+ImTextureData* picture_make(const uint8_t* rgba, int w, int h) {
+    if (!ready || !rgba || w <= 0 || h <= 0) return nullptr;
+    // (as the logo: RGBA32, so pixels() converts it for HDR10 as it does the logo)
+    ImTextureData* tex = IM_NEW(ImTextureData)();
+    tex->Create(ImTextureFormat_RGBA32, w, h);
+    memcpy(tex->GetPixels(), rgba, (size_t)w * h * 4);
+    tex->UseColors = true;
+    ImGui::RegisterUserTexture(tex);
+    return tex;
+}
+void picture_drop(ImTextureData* tex) {
+    if (!tex) return;
+    tex->WantDestroyNextFrame = true;   // (ImGui asks the backend to destroy it from the next frame on: update_texture)
+    pictures_dropped.push_back(tex);
 }
 
 void idle() {
