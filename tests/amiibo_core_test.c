@@ -10,7 +10,11 @@
 static int signals[3], clears[3];
 static void on_signal(int ev) { if (ev >= 0 && ev < 3) signals[ev]++; }
 static void on_clear(int ev) { if (ev >= 0 && ev < 3) clears[ev]++; }
-static void on_random(uint8_t *out, size_t n) { memset(out, 0xA5, n); }
+static unsigned random_calls;   /* (a counter: each call's bytes differ from the call before's) */
+static void on_random(uint8_t *out, size_t n) {
+    random_calls++;
+    for (size_t i = 0; i < n; i++) out[i] = (uint8_t)(0x40 + random_calls * 7 + i);
+}
 
 static int failed;
 #define CHECK(cond) do { if (!(cond)) { printf("FAIL line %d: %s\n", __LINE__, #cond); failed = 1; return; } } while (0)
@@ -86,15 +90,20 @@ static void the_brief(void) {
     for (int i = 7; i < 10; i++) CHECK(tag[i] == 0);
     for (int i = 11; i < 0x20; i++) CHECK(tag[i] == 0);
     for (int i = 0x28; i < 0x58; i++) CHECK(tag[i] == 0);
+    const unsigned calls = random_calls;
     RC(amiibo_tag_info(tag2), 0);
     CHECK(memcmp(tag, tag2, 7) == 0);   /* (random off: the figure's own, every read) */
-    int all_a5 = 1;
-    for (int i = 0; i < 7; i++) all_a5 &= tag[i] == 0xA5;
-    CHECK(!all_a5);
+    CHECK(random_calls == calls);
     amiibo_config(1, 1, 0);
+    uint8_t tag3[0x58];
+    memset(tag2, 0xEE, sizeof tag2);
+    memset(tag3, 0xEE, sizeof tag3);
     RC(amiibo_tag_info(tag2), 0);
-    for (int i = 0; i < 7; i++) CHECK(tag2[i] == 0xA5);
-    CHECK(tag2[10] == 7);
+    RC(amiibo_tag_info(tag3), 0);
+    CHECK(random_calls == calls + 2);   /* (random on: new bytes on every read) */
+    CHECK(memcmp(tag2, tag3, 7) != 0 && memcmp(tag2, tag, 7) != 0);
+    for (int i = 7; i < 10; i++) CHECK(tag2[i] == 0 && tag3[i] == 0);   /* (uuid_length 7: the last three bytes zero) */
+    CHECK(tag2[10] == 7 && tag3[10] == 7);
     amiibo_config(1, 0, 0);
     RC(amiibo_tag_info(tag2), 0);
     CHECK(memcmp(tag, tag2, 7) == 0);
