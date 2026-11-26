@@ -37,8 +37,8 @@ Open the menu (touch pad's click and Options together) and go to the **Amiibo** 
 The chosen figure is saved by its ID in `longshot_options.ini` (`amiibo_figure_id=...`), together with the other rows.
 
 **Random tag ID** is for a figure used again and again. A game may remember a figure's tag ID and refuse a reward it
-already gave to it (whether Ocarina of Time does is still to be tested on the PS5); with the option on, every read shows
-a new tag ID, so the figure would be taken as a new one each time.
+already gave to it; with the option on, every read shows a new tag ID, so the figure is taken as a new one each time. On
+a base PS5 Ocarina of Time took the same figure 21 times in one session with it on (docs/amiibo-nfp-calls.md).
 The game's data for the figure (its application area) stays the figure's own.
 
 ## Where the data is kept
@@ -58,7 +58,8 @@ In the title folder on the PS5:
 - The three amiibo-settings applet calls (`StartNicknameAndOwnerSettings`, `StartGameDataEraser`, `StartRestorer`) are
   answered as "the applet closed, nothing changed" and logged; the figure's registration is always answered, so the
   applet should not be needed.
-- The layout of `ApplicationAreaCreateInfo` is still to be confirmed in the game.
+- Ocarina of Time only reads which figure it is (`GetModelInfo`): it never opens or writes an application area, so the
+  area code (and the assumed layout of `ApplicationAreaCreateInfo`) is not exercised by it.
 - The Amiibo tab's text is English only for now: it is not in the menu's translations (gpu/vk/menu_i18n.h) yet.
 
 ## Privacy
