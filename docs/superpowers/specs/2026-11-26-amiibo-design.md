@@ -194,6 +194,10 @@ added there at `nx2/prompt_requirements.txt`'s pin (`pillow==13.0.0`), so a pack
 
 - Downloads AmiiboAPI at a **pinned commit** (zip from codeload, SHA-256 in the code) into the builder's cache
   (`<work>/amiibo-cache/`, kept like the rest of the work folder), once: a second build uses the cache, offline.
+- **The pictures come from that same repository**, [N3evin/AmiiboAPI](https://github.com/N3evin/AmiiboAPI): its
+  `images/icon_<head>-<tail>.png` (head and tail: the 8-byte ID's two halves in hex, as AmiiboAPI's own API names
+  them), and the figures from its `database/amiibo.json` (names, series, characters). One archive brings both (about
+  150 MB, one request); no other picture source. A figure in the database without a picture gets the silhouette.
 - Writes `amiibo/amiibo.idx` into the title folder: one record per figure (amiibo ID, name, series name, character
   name, picture offset/size), names transliterated to printable ASCII (the menu's glyphs are ASCII), sorted by series
   then name. Format small and fixed, read without a JSON parser.
