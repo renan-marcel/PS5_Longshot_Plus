@@ -3,6 +3,7 @@
   - STEPS has the eighth step, "Downloading the amiibo", in the pipeline and in the window;
   - amiibo(): without the option it says the step is skipped and runs nothing; with it, it runs amiibo.py with
     --app <title folder> --cache <work>/amiibo-cache; a failed run is one warning line and False, never pipeline.Stop;
+    a run that writes nothing over an earlier build's amiibo/ says that catalogue is kept, not "added";
   - the window has the checkbox, the "amiibo" setting (default off) and passes --amiibo; package.py names pillow
     and copies amiibo.py into the kit.
 
@@ -34,8 +35,12 @@ class Recorder:
         self.calls.append(cmd)
         if self.fail:
             raise pipeline.Stop("%s failed (exit 1)" % what)
-        if self.write:
-            os.makedirs(os.path.join(cmd[cmd.index("--app") + 1], "amiibo"), exist_ok=True)
+        if self.write:   # (as amiibo.py writes it: amiibo.idx replaced whole)
+            out = os.path.join(cmd[cmd.index("--app") + 1], "amiibo")
+            os.makedirs(out, exist_ok=True)
+            with open(os.path.join(out, "amiibo.idx.part"), "wb") as f:
+                f.write(b"LSAMIIBO" + os.urandom(8))
+            os.replace(os.path.join(out, "amiibo.idx.part"), os.path.join(out, "amiibo.idx"))
 
 
 class AmiiboStep(unittest.TestCase):
@@ -90,6 +95,34 @@ class AmiiboStep(unittest.TestCase):
         got, out = self.call(Recorder(write=False), True)
         self.assertFalse(got)
         self.assertIn("warning", out.lower())
+
+    def earlier_catalogue(self):
+        out = os.path.join(self.app, "amiibo")
+        os.makedirs(out)
+        with open(os.path.join(out, "amiibo.idx"), "wb") as f:
+            f.write(b"LSAMIIBO-earlier")
+        return os.path.join(out, "amiibo.idx")
+
+    def test_a_failed_refresh_keeps_the_earlier_catalogue(self):
+        # (amiibo.py warns and exits 0 when the download fails: an amiibo/ from an earlier build is still there)
+        idx = self.earlier_catalogue()
+        got, out = self.call(Recorder(write=False), True)
+        self.assertFalse(got)
+        self.assertIn("warning", out.lower())
+        self.assertIn("keeps the catalogue of an earlier build", out)
+        self.assertNotIn("amiibo: added", out)
+        with open(idx, "rb") as f:
+            self.assertEqual(f.read(), b"LSAMIIBO-earlier")
+        got, out = self.call(Recorder(fail=True), True)   # (and a run that fails outright)
+        self.assertFalse(got)
+        self.assertIn("keeps the catalogue of an earlier build", out)
+        self.assertNotIn("amiibo: added", out)
+
+    def test_a_refresh_over_an_earlier_catalogue_is_added(self):
+        self.earlier_catalogue()
+        got, out = self.call(Recorder(), True)
+        self.assertTrue(got)
+        self.assertIn("amiibo: added", out)
 
     def test_build_calls_it_last(self):
         src = text("pipeline.py")

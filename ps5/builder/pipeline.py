@@ -681,20 +681,35 @@ def game_data(kit, work, game, app, folder=False):
 def amiibo(kit, work, app, wanted):
     """(ps5/builder/amiibo.py) the amiibo catalogue and the figures' pictures, downloaded on this PC into <title>/amiibo/
     (amiibo.idx, figures.pak), only with the option. The download (about 151 MB) is cached in <work>/amiibo-cache, so a
-    second build does not repeat it. Never stops the build: a failure is one warning, and the title has no amiibo/. True
-    when amiibo/ was written"""
+    second build does not repeat it. Never stops the build: a failure is one warning, and the title keeps the amiibo/ it
+    had (a catalogue from an earlier build, or none). True when amiibo/ was written by this run"""
     step(8)
     if not wanted:
         say("amiibo: skipped (Download amiibo is not on)")
         return False
     src, env = python_env(kit, work)
+    idx = os.path.join(app, "amiibo", "amiibo.idx")
+
+    def stamp():   # (amiibo.idx as it is on the disk: amiibo.py replaces it whole when it writes the catalogue, else None)
+        try:
+            st = os.stat(idx)
+        except OSError:
+            return None
+        return st.st_mtime_ns, st.st_size, st.st_ino
+
+    before = stamp()
     try:
         run([sys.executable, "-I", "-u", os.path.join(HERE, "amiibo.py"), "--app", app,
              "--cache", os.path.join(work, "amiibo-cache")], env=env, what="downloading the amiibo")
-        if not os.path.isdir(os.path.join(app, "amiibo")):
+        after = stamp()
+        if after is None or after == before:   # (amiibo.py warned and wrote nothing: what is there is an earlier build's)
             raise Stop("no amiibo/ was written")
     except (Stop, OSError) as e:
-        say("warning: the amiibo were not added (%s); the build goes on without them" % str(e).splitlines()[0])
+        why = str(e).splitlines()[0]
+        if before is not None and stamp() is not None:
+            say("warning: the amiibo were not refreshed (%s); the title keeps the catalogue of an earlier build" % why)
+        else:
+            say("warning: the amiibo were not added (%s); the build goes on without them" % why)
         return False
     say("amiibo: added to the title folder")
     return True
