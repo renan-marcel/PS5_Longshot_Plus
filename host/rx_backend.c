@@ -12,6 +12,7 @@
 #include "../gpu/vk/dlss_math.h"
 #include "control.h"
 #include "audio_output_devices.h"
+#include "amiibo_core.h"
 
 /* the stand-ins when there is no Vulkan back end (host/rx_nowgpu.c, host/posix/linux_stubs.c) */
 int wgr_start(void *hwnd);
@@ -218,6 +219,20 @@ static void host_slept_ns(int64_t out[2]) {
     out[1] = hos_slept_ns[1] + __atomic_load_n(&hos_acquire_slept_ns, __ATOMIC_RELAXED);
 }
 
+/* The renderer's Amiibo tab (host/amiibo_core.h): the adapters from MkwVkHost's calls to the core's. */
+static int vk_amiibo_status(void) { return amiibo_device_state(); }
+static void vk_amiibo_select(const uint8_t *id, const char *name) {
+    AmiiboFigure f;
+    if (!id) { amiibo_select(NULL); return; }
+    memcpy(f.id, id, sizeof f.id);
+    size_t n = name ? strnlen(name, sizeof f.name - 1) : 0;   /* (cut to 40 bytes) */
+    if (n) memcpy(f.name, name, n);
+    f.name[n] = 0;
+    amiibo_select(&f);
+}
+static void vk_amiibo_touch(int on) { if (on) amiibo_touch(); else amiibo_remove(); }
+static void vk_amiibo_config(int emulation, int random_uid, int auto_touch) { amiibo_config(emulation, random_uid, auto_touch); }
+
 /* (longshot) typed text for the Insert menu's text fields (MkwVkHost.take_text): the window's thread puts each character and
    editing key in (host/display.c WM_CHAR and WM_KEYDOWN, host/posix/display_sdl.c SDL's text input and key events), the menu
    takes them out at its frames, in order. Nothing is kept while no field has the keyboard, and the window then takes no text
@@ -273,6 +288,7 @@ static const MkwVkHost vk_host = {
     host_romfs_dir, host_wide_menus, host_slept_ns, host_fps_timing, hos_prompts_live_parts, host_screen_size,
     host_take_text, hos_options_file,
     hos_audio_output_count, hos_audio_output_info, hos_audio_output_select, hos_audio_output_state,
+    vk_amiibo_status, vk_amiibo_select, vk_amiibo_touch, vk_amiibo_config,
 };
 
 static const MkwVkRenderer *vk;   /* the Vulkan back end, when it was chosen and started */
