@@ -31,13 +31,14 @@ Open the menu (touch pad's click and Options together) and go to the **Amiibo** 
 | **Figure** | none until chosen | The figure the game reads when it asks for an amiibo. Left and Right choose; its picture is beside the list. |
 | **Surprise me** | | Picks a figure of the series at random. |
 | **Random tag ID** | On | Each read is a new figure with a tag ID of its own, so the game lets the same figure be used again. Off: the figure keeps one ID. |
-| **Touch when the game asks** | On | The figure is put on the reader as soon as the game looks for one, and taken off once it has been read. |
+| **Touch when the game asks** | On | The figure is put on the reader as soon as the game looks for one, and taken off when the game stops looking. |
 | **Touch / Remove** | | Puts the figure on the reader, or takes it off: for a game that asks you to remove the figure, or with Touch when the game asks off. |
 
 The chosen figure is saved by its ID in `longshot_options.ini` (`amiibo_figure_id=...`), together with the other rows.
 
-**Random tag ID** is for a figure used again and again. The game remembers a figure's tag ID and refuses a reward it
-already gave to it; with the option on, every read shows a new tag ID, so the figure is taken as a new one each time.
+**Random tag ID** is for a figure used again and again. A game may remember a figure's tag ID and refuse a reward it
+already gave to it (whether Ocarina of Time does is still to be tested on the PS5); with the option on, every read shows
+a new tag ID, so the figure would be taken as a new one each time.
 The game's data for the figure (its application area) stays the figure's own.
 
 ## Where the data is kept
@@ -58,7 +59,7 @@ In the title folder on the PS5:
   answered as "the applet closed, nothing changed" and logged; the figure's registration is always answered, so the
   applet should not be needed.
 - The layout of `ApplicationAreaCreateInfo` is still to be confirmed in the game.
-- The tab's text is English only, like the rest of the menu.
+- The Amiibo tab's text is English only for now: it is not in the menu's translations (gpu/vk/menu_i18n.h) yet.
 
 ## Privacy
 

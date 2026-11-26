@@ -1806,8 +1806,8 @@ Row rows[] = {
      "Each read is a new figure with a tag ID of its own, so the game lets the same figure be used again. Off: the figure "
      "keeps one ID.", nullptr, false, true},
     {TAB_AMIIBO, "Touch when the game asks", &opts.amiibo_auto, 0, 1, 1, tx_onoff,
-     "The figure is put on the reader as soon as the game looks for one, and taken off once it has been read.", nullptr,
-     false, true},
+     "The figure is put on the reader as soon as the game looks for one, and taken off when the game stops looking.",
+     nullptr, false, true},
     {TAB_AMIIBO, "Touch / Remove", nullptr, 0, 0, 0, nullptr,
      "Puts the figure on the reader, or takes it off: for a game that asks you to remove the figure, or with Touch when the "
      "game asks off."},
