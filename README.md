@@ -281,6 +281,13 @@ Your choices are saved in `longshot_options.ini` in the title's folder on the co
 Every row of the menu is described in
 [Longshot's own README](https://git.magicbean.dev/MagicBeanDev/Longshot#in-game-menu), for the PC game.
 
+### Amiibo
+
+The game's own amiibo rewards work from a virtual figure: tick **Download amiibo** in the builder (`--amiibo` on the
+command line), then choose a figure in the menu's **Amiibo** tab. The names and pictures are downloaded on your PC into
+your title folder and never shared; no keys or dumps are needed. Details, rows and limits:
+[docs/amiibo.md](docs/amiibo.md).
+
 ### Controls
 
 The DualSense of the user who started the title. By default the buttons sit where the Switch's do:
