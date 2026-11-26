@@ -8,7 +8,7 @@ A new game runs from the title screen through the opening to Link's house (10 mi
 loads that autosave, walks out of the house and around Kokiri Forest. Frame rates the log gives: 59.9 at the title and
 in movies, about 40 in the opening's scenes, 50 in Link's house, 35 in the forest (measured with a screenshot taken
 every 120 presents). No crash or GPU fault in five runs. Not tried: beyond the forest, sound by ear, a real controller.
-Players build it with the desktop builder, `ps5/builder` (an AppImage and a portable Windows folder).
+Players build it with the desktop builder, `ps5/builder` (an AppImage and a portable Windows folder). Its option Download amiibo fetches the amiibo pictures on the player's PC into the title folder; they are not shared.
 
 Frame generation is on from the start, at 2x, the Frame generation row's default on the console: the menu changes it and
 `longshot_options.ini` keeps it. On the console the row names its values for what they do to the game: "2x (game at

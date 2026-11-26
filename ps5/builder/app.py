@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, QF
 HERE = os.path.dirname(os.path.abspath(__file__))
 PIPELINE = os.environ.get("LONGSHOT_PS5_PIPELINE", os.path.join(HERE, "pipeline.py"))
 STEPS = ["Reading the game's program", "Translating it to C", "Compiling for the console", "Linking", "Making the title folder",
-         "Listing the game's shaders", "Extracting the game's data"]
+         "Listing the game's shaders", "Extracting the game's data", "Downloading the amiibo"]
 ABOUT = {
     1: "A few seconds.",
     2: "5 to 15 minutes. About 2 GB of memory, more to go faster where it is free.",
@@ -23,6 +23,8 @@ ABOUT = {
     6: "A few seconds.",
     7: "10 to 40 minutes: every game file (about 26 GB) into the title folder: 53 packs in Data/ and Data.idx (loose files "
        "with Game data as a folder). Wants that much free on its drive.",
+    8: "Only with Download amiibo: about 151 MB downloaded once (kept for the next build), 42 MB in the title folder. A few "
+       "minutes. If it fails, the build goes on without the amiibo.",
 }
 
 STYLE = """
@@ -316,6 +318,10 @@ class Window(QWidget):
         self.known_skips = QCheckBox("Skip shaders known to hang the GPU (what they draw there is missing)")
         self.known_skips.setChecked(str(self.settings.value("known_skips", "true")).lower() == "true")
         grid.addWidget(self.known_skips, 4, 1, 1, 4)
+        # (the amiibo catalogue and the figures' pictures, downloaded into the title folder by ps5/builder/amiibo.py: off)
+        self.amiibo = QCheckBox("Download amiibo (the catalogue and the figures' pictures, about 42 MB, once)")
+        self.amiibo.setChecked(str(self.settings.value("amiibo", "false")).lower() == "true")
+        grid.addWidget(self.amiibo, 5, 1, 1, 4)
         grid.setColumnStretch(1, 2)
         grid.setColumnStretch(3, 2)
 
@@ -436,7 +442,7 @@ class Window(QWidget):
 
     def busy(self, on):
         for w in (self.game, self.game_pick, self.out, self.out_pick, self.jobs, self.memory, self.model, self.data_folder,
-                  self.known_skips):
+                  self.known_skips, self.amiibo):
             w.setEnabled(not on)
         self.go.setText("Stop Build" if on else "Build Title")
         self.go.setObjectName("StopBtn" if on else "PrimaryBtn")
@@ -462,7 +468,8 @@ class Window(QWidget):
             QMessageBox.warning(self, "No console", "Choose your console: PS5 / PS5 Slim, or PS5 Pro.")
             return
         for k, v in (("game", game), ("out", out), ("jobs", self.jobs.value()), ("memory", self.memory.currentData()), ("model", model),
-                     ("data_folder", self.data_folder.isChecked()), ("known_skips", self.known_skips.isChecked())):
+                     ("data_folder", self.data_folder.isChecked()), ("known_skips", self.known_skips.isChecked()),
+                     ("amiibo", self.amiibo.isChecked())):
             self.settings.setValue(k, v)
         os.makedirs(out, exist_ok=True)
         self.log.clear()
@@ -484,6 +491,8 @@ class Window(QWidget):
             args += ["--data-folder"]
         if not self.known_skips.isChecked():
             args += ["--no-known-skips"]
+        if self.amiibo.isChecked():
+            args += ["--amiibo"]
         self.error = ""
         self.proc = Build(args)
         self.proc.line.connect(self.line)

@@ -23,7 +23,7 @@ SDK_REV=55a2de04e3364f0a6c8d6c337dc95436cf091ef0
 MIHAWKGEN_REV=c57232a9f16bcb6df5fe07c9bb631518f2b1cc0e
 # (the headers gpu/vk is compiled with: scripts/linux/deps.sh's pins, which ps5/build.py names)
 VK_HEADERS=v1.4.345 SPIRV_HEADERS=vulkan-sdk-1.4.341.0 VMA=v3.3.0
-PYTHON_PACKAGES=(lz4 numpy capstone "unicorn>=2.1,<2.2" zstandard meson ninja mako pyyaml packaging)
+PYTHON_PACKAGES=(lz4 numpy capstone "unicorn>=2.1,<2.2" zstandard pillow meson ninja mako pyyaml packaging)
 APT_PACKAGES="git curl wget unzip xz-utils rsync make nasm pkg-config bison flex file ca-certificates python3 python3-venv \
 clang lld llvm llvm-dev libclang-rt-18-dev libclang-dev libclang-cpp-dev libclc-18-dev libllvmspirvlib-18-dev spirv-tools glslang-tools \
 zlib1g-dev libzstd-dev g++"
