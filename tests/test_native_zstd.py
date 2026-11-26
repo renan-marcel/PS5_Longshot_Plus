@@ -646,6 +646,8 @@ def build(cxx, tmp, broken=False, conc=False):
         src = src.replace(old, new)
     (d / "hos_zstd.c").write_text(src, encoding="utf-8")   # (beside the stand-in hos.h: quotes look there first)
     (d / "hos.h").write_text(HOS_H, encoding="utf-8")
+    # (the real header: the file tags it declares are fed on the PS5 only, so the PC build calls none of them)
+    (d / "asset_tags.h").write_text((ROOT / "host/asset_tags.h").read_text(encoding="utf-8"), encoding="utf-8")
     (d / "fixture.c").write_text(CONC if conc else FIXTURE, encoding="utf-8")
     flags = ["-O1", "-DZSTD_DISABLE_ASM", "-DZSTD_LEGACY_SUPPORT=0", "-DZSTD_MULTITHREAD=0", "-D_CRT_SECURE_NO_WARNINGS",
              "-I" + str(ZSTD)]
