@@ -1,6 +1,6 @@
 # Mods chosen in the builder: design
 
-Status: draft for approval · Branch: `feature/amiibo` for now (its own branch from `fork/develop` when built) ·
+Status: approved for planning (2026-11-26) · Branch: `feature/builder-mods`, from `feature/amiibo` (the step list counts the amiibo step) ·
 A second piece of work, after the amiibo one (`2026-11-26-amiibo-design.md`).
 
 ## Intent
@@ -106,15 +106,23 @@ Translating it to C, 4 Compiling, 5 Linking, 6 Making the title folder, 7 Listin
 game's data, 9 Downloading the amiibo, **10 Copying the mods**. A step with nothing to do says so and ends at once.
 
 - **Step 2** (`ps5/builder/mods.py`, run like `game_data.py`): copies `<work>/game/exefs` to
-  `<work>/game/exefs-mods`, then for each ticked mod in order, for each module of the exefs (`main`, `sdk`,
-  `subsdk*`), the patches whose build id matches that module's are applied to it (the NSO decompressed and written
-  back as the lifter reads it). The translation then reads `exefs-mods` when any patch applied, `exefs` otherwise.
+  `<work>/game/exefs-mods`, then for each ticked mod in order the patches whose build id matches `main`'s are applied
+  to it (the NSO decompressed and written back as the lifter reads it). **Only `main`**: the standalone build replaces
+  the SDK's OS-facing functions, so a patch to `sdk`/`subsdk*` may do nothing or something else than on Lichii; such
+  a patch is listed as "code patch for the SDK: not supported" and not applied. The translation then reads `exefs-mods` when any patch applied, `exefs` otherwise.
   Written fresh after Lichii's `ips_layer.cpp` (adaptable with credit: GPLv3).
-- **The translation's key** includes every module's hash (not only `main`'s), so a patch to `sdk` translates again too;
-  a change of code patches costs a translation (the long step), and the window says so beside the list.
-- **Longshot's own patches** (`oot_patches.py`) still apply inside the translation. A mod's patch over the same bytes
-  can clash: `oot_patches.py`'s check of the original bytes stops the translation with its own message; the builder
-  names the mod patches applied in that message.
+- **The translation's key** is `main`'s hash, patched (as today): a change of code patches costs a translation (the
+  long step), and the window says so beside the list.
+- **A clash with Longshot's own changes is checked before translating, and stops the build** (the person's choice,
+  2026-11-26). Longshot changes the game's code in three ways: `nx2/oot_patches.py` edits translated functions by
+  their text (most only warn when their place is not found, so a mod over them would drop them silently, among them
+  crash fixes such as the heap-allocation retry), `nx2/entry_hooks.py` hooks functions by address, and the `HLE(...)`
+  functions replace SDK imports. Step 2 builds the set of functions these touch (by their start address, `f_<addr>`
+  in oot_patches.py / entry_hooks.py) and their extents (from the translation's function list of the unpatched
+  program, kept in the work folder; the plan's first task finds where the lifter keeps it, and what to do when it is
+  not there yet), maps each mod patch's byte range to addresses in `main`, and stops the build when one falls inside
+  such a function: the message names the mod, the patch file, the address and Longshot's function (and what it does,
+  from oot_patches.py's comment). Nothing is translated then.
 - **Step 10** copies each ticked mod's `romfs/` into `PPSA99198/mods/<mod name>/romfs/`, and only that (`exefs/` is
   already in the program, `cheats/` not supported). The builder keeps a list of what it copied
   (`PPSA99198/mods/.builder-mods.txt`): a mod unticked since the last build is removed, a folder the builder did not
@@ -148,6 +156,17 @@ for this version applies (its effect seen). Then `python -I -B tests/run_all.py`
   `nx2/nso2.py` first).
 - The README.txt's wording.
 
+## Calls made after the builder check (2026-11-26)
+
+- **Clash policy:** check before translating and stop (the person chose it, of three: also "stop during the
+  translation", "only warn").
+- **Only `main` is patched** (above): fewer moving parts, and patches to the replaced SDK are not meaningful here.
+- **The PS5's `mods/` root is checked first in the game**, before the window work: a small `romfs` mod copied by hand
+  into `PPSA99198/mods/` (the plan's early task). If the game does not see it there, the plan stops and comes back
+  with what `host/mods.c` needs.
+- **Built on `feature/amiibo`** (branch `feature/builder-mods`): the step list here counts the amiibo step; its PR
+  follows the amiibo one.
+
 ## Open, needs the person
 
-- Nothing before planning. The PS5 check (step 5) needs the person's console.
+- The PS5 checks (the `mods/` root, then a real code patch) need the person's console.
