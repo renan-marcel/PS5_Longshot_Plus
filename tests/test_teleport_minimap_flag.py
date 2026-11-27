@@ -192,8 +192,15 @@ def build(cc, tmp, source_path=None):
     places = source[places:source.index("};", source.index("static const OotDestination oot_destinations[] = {")) + 2]
     start = source.index("#define OOT_GAMEDATA_SLOT")
     end = block_end(source, source.index("static int oot_gamedata_set_bool(Ctx *c, uint32_t hash, int value) {"))
+    events = source.index("#define OOT_EVENTMGR_SLOT")
+    if start < source.index("static int oot_gamedata_string(Ctx *c, uint32_t hash, char *buf, size_t size) {") < events:
+        # (the game-data readers the PS5's scene poll uses sit before the debug tools: them, then the debug tools' part)
+        readers = source[start:block_end(source, source.index("static int oot_gamedata_string(Ctx *c, uint32_t hash,"))]
+        code = readers + "\n" + source[events:end]
+    else:
+        code = source[start:end]
     src, exe = tmp / "teleport.c", tmp / "teleport"
-    src.write_text(STAND_IN + places + "\n" + source[start:end] + RUN, encoding="utf-8")
+    src.write_text(STAND_IN + places + "\n" + code + RUN, encoding="utf-8")
     subprocess.run([cc, "-std=gnu11", "-O1", "-w", str(src), "-o", str(exe)], check=True)
     return exe
 

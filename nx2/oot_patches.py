@@ -22,6 +22,9 @@ Each is a runtime switch where it can be, so the game's own path stays reachable
 - The OptimizeChangeBank thread's allocations tried again when their heap is full (host/oot_heap_retry.c): f_804566e0's two
   calls of f_80522050, its GPU memory (GPU_ALLOC_SITES), and its two tryAllocs of CPU buffers (HEAP_ALLOC_SITES). Otherwise
   they go on with a null pointer and crash writing through it. The supported build only.
+- The pages under what the heaps free (host/oot_heap_give_back.c, HOS_PS5_HEAP_GIVE_BACK, off by default): sead::ExpHeap::free
+  (f_803b44e0) calls hos_oot_heap_free first, which counts the block's bytes and whole units (observe) or gives a large
+  block's whole units back to the console (reclaim); the free runs after it, once. The supported build only.
 - The Voice Language option kept after a restart (host/oot_voice.c): the voice resource's update (f_80a9ca30) asks
   GameDataMgr whether the option was written (f_80a9d1c0) and applies it only then; option.sav's value replaces the
   option without a write, so a saved choice would never be applied. The call goes through hos_oot_voice_option,
@@ -362,6 +365,19 @@ def patch_zstd_stream(source):
         return source
     at = start + len(ZSTD_HEAD)
     return (source[:at] + ZSTD_CALL + source[at:]).replace('#include "a64.h"\n', '#include "a64.h"\nint hos_zstd_stream(Ctx *c);\n', 1)
+
+
+HEAP_FREE_HEAD = "void f_803b44e0(Ctx *__restrict A64_NOESC c) {\n"
+HEAP_FREE_CALL = ("    hos_oot_heap_free(c);   /* (nx2/oot_patches.py: HOS_PS5_HEAP_GIVE_BACK, host/oot_heap_give_back.c; "
+                  "the free runs after it, once) */\n")
+
+
+def patch_heap_free(source):
+    """f_803b44e0, sead::ExpHeap::free (x0 the heap, x1 the block's payload; vtable 0x84c172c8 +0x38), calls hos_oot_heap_free
+    first: HOS_PS5_HEAP_GIVE_BACK=observe counts what the blocks freed hold, reclaim gives a large block's whole units back to
+    the console before the free runs (host/oot_heap_give_back.c). The hook returns nothing: the free runs after it, as
+    lifted, every time"""
+    return _hook_head(source, HEAP_FREE_HEAD, HEAP_FREE_CALL, "void hos_oot_heap_free(Ctx *c);\n")
 
 
 ZSTD_FRAMES_HEAD = "void f_8010b380(Ctx *__restrict A64_NOESC c) {\n"
@@ -1626,6 +1642,12 @@ def patch_file(s, name, protect_hearts=False):
             lines.append("oot_patches: the zstd whole-buffer decode's host hook in " + name)
         out = zf
         counts["zstd frames hook"] += 1
+    hf = patch_heap_free(out) if protect_hearts else None
+    if hf is not None:
+        if hf != out:
+            lines.append("oot_patches: the heap free's host hook in " + name)
+        out = hf
+        counts["heap free hook"] += 1
     layout = patch_text_layout(out) if protect_hearts else None
     if layout is not None:
         out = layout
@@ -1839,6 +1861,7 @@ def report(paths, counts, protect_hearts=False):
         done["scene format"] = 0
         done["zstd stream hook"] = 0
         done["zstd frames hook"] = 0
+        done["heap free hook"] = 0
         done["voice option check"] = 0
     total = collections.Counter()
     for c in counts:

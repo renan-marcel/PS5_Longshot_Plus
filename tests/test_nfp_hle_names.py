@@ -75,9 +75,10 @@ def check_names(src):
 def compile_test(cc, work, exe, sanitize):
     flags = ["-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-g"] if sanitize else ["-g"]
     if os.name != "nt":   # (the PS5's logs/nfp.txt writer, POSIX like the PS5's C library; its cap small enough to reach)
-        flags += ["-DNFP_FILE_LOG", "-DNFP_FILE_CAP=1024"]
+        flags += ["-DNFP_FILE_LOG", "-DPS5_LOGFILE_CAP=1024"]
     return subprocess.run([cc, "-std=c11", "-Wall", "-Wextra", "-Werror"] + flags +
-                          [str(ROOT / "tests" / "nfp_hle_test.c"), str(work / "nn_nfp.c"), str(work / "amiibo_core.c"),
+                          [str(ROOT / "tests" / "nfp_hle_test.c"), str(work / "nn_nfp.c"), str(work / "amiibo_core.c")] +
+                          ([str(ROOT / "host" / "ps5" / "ps5_logfile.c"), "-lpthread"] if os.name != "nt" else []) + [
                            "-I", str(work), "-o", str(exe)], capture_output=True, text=True)
 
 

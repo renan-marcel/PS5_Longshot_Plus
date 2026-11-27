@@ -6,7 +6,7 @@ AddressSanitizer.
 - log.txt holds the log's last 64 KB, oldest first, from the start of a line, when more was kept; all of it when less;
 - longshot_env.txt, longshot_options.ini and logs/crash_trace.txt are copied when there, and left out when not;
 - every break reaches it: the PS5's signal handler, the end of win32_posix.c's (an unhandled one), hos_fatal (a trap of the
-  game's code), the memory floor, a GPU freeze (as kind "freeze"); hos_thread.c keeps the log for it.
+  game's code), the memory floor, a GPU freeze (as kind "freeze"); hos_thread.c's hos_vlog keeps the log for it.
 
     python -I -B tests/test_ps5_bug_report.py [--cc gcc]
 """
@@ -104,7 +104,7 @@ def main():
     need('hos_ps5_bug_report("crash", "UNHANDLED_SIGNAL", why);' in (ROOT / "host/posix/win32_posix.c").read_text(encoding="utf-8"),
          "an unhandled signal writes one")
     th = (ROOT / "host/hos_thread.c").read_text(encoding="utf-8")
-    need('hos_ps5_bug_report("crash", "FATAL", buf);' in th and "hos_ps5_log_keep(lines[i], strlen(lines[i]));" in th,
+    need('hos_ps5_bug_report("crash", "FATAL", buf);' in th and "hos_ps5_log_keep(line, strlen(line));" in th,
          "a trap of the game's code writes one, and the log is kept for it")
     print("PASS: a break leaves its report in bug-reports/")
 

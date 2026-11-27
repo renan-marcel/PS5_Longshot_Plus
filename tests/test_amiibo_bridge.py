@@ -20,7 +20,7 @@ def need(ok, msg):
         raise SystemExit("FAIL: " + msg)
 
 
-need(re.search(r"#define MKWVK_API_VERSION 25\b", api), "MKWVK_API_VERSION is not 25")
+need(re.search(r"#define MKWVK_API_VERSION 26\b", api), "MKWVK_API_VERSION is not 26")
 struct = code(between(api, "typedef struct MkwVkHost {", "} MkwVkHost;"))
 fields = [re.search(r"\(\*(\w+)\)", d).group(1) for d in struct.split(";") if "(*" in d]
 need(fields[-4:] == ["amiibo_status", "amiibo_select", "amiibo_touch", "amiibo_config"],

@@ -4359,7 +4359,34 @@ uint64_t linux_pressure_shortfall(uint64_t* seq) {
     return linux_shortfall_bytes.load(std::memory_order_acquire);
 }
 
+#ifdef __PROSPERO__
+}   // namespace mkwvk
+extern "C" {
+int rx_vk_tags_wanted;   // (host/ps5/win32_ps5.c: 5 s after a zone change, count the textures by the file they came from)
+typedef struct { uint64_t tagged_n, tagged_bytes, untagged_n, untagged_bytes, unwanted_n, unwanted_bytes; } AssetTagTally;
+void asset_tags_tally(AssetTagTally* t, uint64_t storage, uint64_t bytes, int (*wanted)(const char* path));   // (host/asset_tags.c)
+void asset_tags_line(const AssetTagTally* t, char* line, size_t cap);
+int asset_prefetch_zone_wanted(const char* path);   // (host/ps5/asset_prefetch.c)
+void hos_ps5_logfile(const char* name, const char* line);   // (host/ps5/ps5_logfile.c)
+}
+namespace mkwvk {
+/// (PS5) the textures by the file they came from (host/asset_tags.h), on the renderer's thread, which owns the table: logging
+/// only (logs/memory.txt), what a zone change leaves that the new zone does not want
+static void tags_count() {
+    AssetTagTally t{};
+    for (const auto& kv : textures) {
+        const Texture* tex = kv.second.get();
+        if (tex && tex->guest) asset_tags_tally(&t, tex->guest, tex->guest_size, asset_prefetch_zone_wanted);
+    }
+    char line[256];
+    asset_tags_line(&t, line, sizeof line);
+    hos_ps5_logfile("memory.txt", line);
+}
+#endif
 void texture_frame(uint64_t completed) {
+#ifdef __PROSPERO__
+    if (__atomic_exchange_n(&rx_vk_tags_wanted, 0, __ATOMIC_ACQ_REL)) tags_count();
+#endif
     const TraceTimer timed{st_texture_frame_ns};   // (longshot: the frame trace's tex_frame_ms)
     upload_frame_report();
     frame_upload_ns.store(0, std::memory_order_relaxed);

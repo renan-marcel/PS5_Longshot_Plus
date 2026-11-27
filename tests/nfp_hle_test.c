@@ -294,7 +294,7 @@ int main(int argc, char **argv) {
 
     CHECK(lines > 20 && bad_lines == 0, "every log line starts with [NFP]");
 #ifdef NFP_FILE_LOG
-    /* (the PS5's file, here with NFP_FILE_CAP 1024: the lines up to the cap, then one saying it is full, nothing after) */
+    /* (the PS5's file, here with PS5_LOGFILE_CAP 1024: the lines up to the cap, then one saying it is full, nothing after) */
     char text[8192];
     snprintf(path, sizeof path, "%s/logs/nfp.txt", title);
     f = fopen(path, "rb");

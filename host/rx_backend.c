@@ -581,6 +581,16 @@ int rx_guest_imported(uint64_t lo, uint64_t hi) {
     if (away) hos_vcore_back();
     return r;
 }
+/* (host/oot_heap_give_back.c) [lo, hi) less what a GPU import holds, each run left to free_run with the back end's pool locks held
+   (vk_memory.cpp memory_guest_discard); the bytes an import holds. -1, and free_run never called, without a back end that can
+   say: what it does to the pages would then not be shown to be the CPU's alone */
+int64_t rx_guest_discard(uint64_t lo, uint64_t hi, void (*free_run)(void *ctx, uint64_t run_lo, uint64_t run_hi), void *ctx) {
+    if (!vk || !vk->guest_discard) return -1;
+    const int away = hos_vcore_away();   /* (the pool lock, as rx_guest_imported's) */
+    const uint64_t kept = vk->guest_discard(lo, hi, free_run, ctx);
+    if (away) hos_vcore_back();
+    return (int64_t)kept;
+}
 /* (nvn_native.c: the CPU set an event's value) in order with the submits, for the GPU's waits on it */
 int rx_option(int id, int otherwise) { return vk && vk->option ? vk->option(id) : otherwise; }
 void rx_option_set(int id, int value) { if (vk && vk->option_set) vk->option_set(id, value); }

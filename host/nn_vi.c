@@ -174,6 +174,14 @@ static int fps_max(void) {
 }
 static int64_t next_frame_at, window_start, frames_in_window;
 static volatile LONG64 presents;
+static volatile LONG64 slow_presents;   /* (present-to-present intervals over 34 ms, all the run's) */
+static int64_t worst_interval_ns;       /* (the longest since hos_vi_pace last asked) */
+/* (host/ps5/win32_ps5.c: logs/memory.txt's "pool" line) the frames presented and those over 34 ms, the run's, and the longest
+   present-to-present interval since the last call, in ms */
+void hos_vi_pace(int64_t *frames, int64_t *slow, double *worst_ms) {
+    *frames = presents, *slow = slow_presents;
+    *worst_ms = (double)__atomic_exchange_n(&worst_interval_ns, 0, __ATOMIC_RELAXED) / 1e6;
+}
 int hos_vi_native_interval(Ctx *c, int requested) {
     (void)c;
     /* (longshot) OoT's frame-rate controller asks for 2, 3 or 4 vsyncs a frame whenever one runs long (480 changes a minute
@@ -597,6 +605,9 @@ void hos_vi_native_presented(const int64_t phases[4]) {
     if (last_present) {
         const int64_t d = now - last_present;
         hist[d < 15500000 ? 0 : d < 17800000 ? 1 : d < 22000000 ? 2 : d < 30000000 ? 3 : d < 40000000 ? 4 : 5]++;
+        if (d > 34000000) InterlockedIncrement64(&slow_presents);   /* (hos_vi_pace: a 30 fps frame missed) */
+        int64_t w = __atomic_load_n(&worst_interval_ns, __ATOMIC_RELAXED);
+        while (d > w && !__atomic_compare_exchange_n(&worst_interval_ns, &w, d, 1, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {}
     }
     last_present = now;
     if (now - window_start >= 5000000000LL) {

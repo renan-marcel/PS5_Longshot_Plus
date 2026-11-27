@@ -6432,6 +6432,7 @@ void fill_replay_table(MkwVkRenderer& t) {
     t.nvn_invalidate = invalidate;
     t.nvn_pool_created = memory_pool_created;
     t.guest_imported = memory_guest_imported;
+    t.guest_discard = memory_guest_discard;
     t.nvn_vmap_changing = vmap_changing;
     t.nvn_texture_created = texture_created_of;
 }

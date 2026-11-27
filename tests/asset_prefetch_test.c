@@ -8,6 +8,7 @@
      wait             until the module's thread has nothing left to do
      room:<MB>        the title's free memory from now on (host/ps5/win32_ps5.c's hos_ps5_direct_room)
      stats            prints the module's counters
+     zone             prints "zone <the current zone>"; every zone change prints "zone-change <old> -> <new>"
      stop             stops the module (its profiles are written) */
 #include <fcntl.h>
 #include <stdarg.h>
@@ -55,6 +56,8 @@ int pak_romfs_file(int64_t node, int *fd, uint64_t *base, uint64_t *size) {
     return 1;
 }
 
+static void on_zone(const char *old_zone, const char *new_zone) { printf("zone-change %s -> %s\n", old_zone, new_zone); }
+
 static uint64_t fnv(const uint8_t *p, size_t n) {
     uint64_t h = 1469598103934665603ull;
     for (size_t i = 0; i < n; i++) h = (h ^ p[i]) * 1099511628211ull;
@@ -78,6 +81,7 @@ int main(int argc, char **argv) {
     }
     fclose(list);
     asset_prefetch_init(argv[1]);
+    asset_prefetch_on_zone(on_zone);
     for (int i = 4; i < argc; i++) {
         const char *c = argv[i];
         char full[600];
@@ -110,6 +114,8 @@ int main(int argc, char **argv) {
                    (unsigned long long)s.hits, (unsigned long long)s.disk_reads, (unsigned long long)s.prefetched,
                    (unsigned long long)s.released, (unsigned long long)s.evicted, (unsigned long long)s.held_bytes,
                    (unsigned long long)s.entries);
+        } else if (!strcmp(c, "zone")) {
+            printf("zone %s\n", asset_prefetch_zone_now());
         } else if (!strcmp(c, "stop")) {
             asset_prefetch_stop();
         }

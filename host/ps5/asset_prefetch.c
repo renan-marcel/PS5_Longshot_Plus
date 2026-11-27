@@ -26,8 +26,9 @@ __attribute__((weak)) uint64_t hos_ps5_direct_room(void);
 const uint8_t *pak_romfs_build_id(void);
 
 #define DEPS_MAGIC "LSDP"
-#define DEPS_VERSION 1u
+#define DEPS_VERSION 2u        /* (1 is read too: each scene a zone of its own) */
 #define DEPS_HEAD 0x80u
+#define DEPS_HEAD_V2 0xD0u      /* (version 2: the zone tables, offsets at 0x80) */
 #define BUCKETS 4096u
 #define PROFILE_MAX 6000u        /* (lines kept per scene) */
 #define SCENE_MAX 96
@@ -69,6 +70,11 @@ static const uint32_t *dlists, *dpaths, *dnbrs;
 static const char *dnames;
 static uint32_t nscenes, npaths;
 static uint64_t nlists, nnbrs, names_size;
+/* (version 2) the zones: a scene's zone is its maps' folder (ps5/builder/asset_deps.py zones) */
+typedef struct { uint32_t name, len, sfirst, scount, ffirst, fcount, nfirst, ncount; } DZone;
+static const DZone *dzones;
+static const uint32_t *dzscenes, *dzfiles, *dznbrs, *dscene_zone;
+static uint64_t nzones;
 
 static int deps_load(const char *path) {
     FILE *f = fopen(path, "rb");
@@ -89,7 +95,7 @@ static int deps_load(const char *path) {
     const uint64_t s = (uint64_t)size;
     /* (every section inside the file, at a multiple of 4, and the build id the packs': the format's own checks; its SHA-256
        is the builder's to check, ps5/builder/asset_deps.py decode) */
-    if (memcmp(raw, DEPS_MAGIC, 4) || version != DEPS_VERSION || !bid || memcmp(raw + 0x10, bid, 16) || nscenes > SCENE_MAX * 4 ||
+    if (memcmp(raw, DEPS_MAGIC, 4) || (version != 1 && version != DEPS_VERSION) || !bid || memcmp(raw + 0x10, bid, 16) || nscenes > SCENE_MAX * 4 ||
         sc % 4 || li % 4 || pa % 4 || nb % 4 || sc > s || (uint64_t)nscenes * 32 > s - sc || li > s || nlists * 4 > s - li ||
         pa > s || (uint64_t)npaths * 8 > s - pa || nb > s || nnbrs * 4 > s - nb || na > s || names_size > s - na) {
         free(raw);
@@ -108,6 +114,29 @@ static int deps_load(const char *path) {
         if (dnbrs[i] >= nscenes) { free(raw); dscenes = NULL; return -1; }
     for (uint32_t i = 0; i < npaths; i++)
         if ((uint64_t)dpaths[2 * i] + dpaths[2 * i + 1] > names_size) { free(raw); dscenes = NULL; return -1; }
+    dzones = NULL, nzones = 0;
+    if (version >= 2) {   /* (the zones, each section inside the file and every index in range; else the map is refused) */
+        uint64_t zo, nz, zso, nzs, zfo, nzf, zno, nzn, szo;
+        if ((uint64_t)size < DEPS_HEAD_V2) { free(raw); dscenes = NULL; return -1; }
+        memcpy(&zo, raw + 0x80, 8), memcpy(&nz, raw + 0x88, 8), memcpy(&zso, raw + 0x90, 8), memcpy(&nzs, raw + 0x98, 8);
+        memcpy(&zfo, raw + 0xA0, 8), memcpy(&nzf, raw + 0xA8, 8), memcpy(&zno, raw + 0xB0, 8), memcpy(&nzn, raw + 0xB8, 8);
+        memcpy(&szo, raw + 0xC0, 8);
+        int bad = zo % 4 || zso % 4 || zfo % 4 || zno % 4 || szo % 4 || zo > s || nz > nscenes || nz * 32 > s - zo || zso > s ||
+                  nzs * 4 > s - zso || zfo > s || nzf * 4 > s - zfo || zno > s || nzn * 4 > s - zno || szo > s ||
+                  (uint64_t)nscenes * 4 > s - szo;
+        const DZone *z = (const DZone *)(raw + zo);
+        const uint32_t *zs = (const uint32_t *)(raw + zso), *zf = (const uint32_t *)(raw + zfo), *zn = (const uint32_t *)(raw + zno),
+                       *sz = (const uint32_t *)(raw + szo);
+        for (uint64_t i = 0; !bad && i < nz; i++)
+            bad = (uint64_t)z[i].name + z[i].len > names_size || (uint64_t)z[i].sfirst + z[i].scount > nzs ||
+                  (uint64_t)z[i].ffirst + z[i].fcount > nzf || (uint64_t)z[i].nfirst + z[i].ncount > nzn;
+        for (uint64_t i = 0; !bad && i < nzs; i++) bad = zs[i] >= nscenes;
+        for (uint64_t i = 0; !bad && i < nzf; i++) bad = zf[i] >= npaths;
+        for (uint64_t i = 0; !bad && i < nzn; i++) bad = zn[i] >= nz;
+        for (uint32_t i = 0; !bad && i < nscenes; i++) bad = sz[i] >= nz;
+        if (bad) { free(raw); dscenes = NULL; return -1; }
+        dzones = z, dzscenes = zs, dzfiles = zf, dznbrs = zn, dscene_zone = sz, nzones = nz;
+    }
     deps = raw, deps_size = (size_t)size;
     return 1;
 }
@@ -117,6 +146,17 @@ static int deps_scene(const char *name) {
     for (uint32_t i = 0; i < nscenes && deps; i++)
         if (dscenes[i].len == n && !memcmp(dnames + dscenes[i].name, name, n)) return (int)i;
     return -1;
+}
+
+/* The zone of a scene: its zone's name (version 2), else the scene itself; into out (cap), "" for an empty scene */
+static void zone_of(const char *scene, char *out, size_t cap) {
+    const int s = scene && scene[0] ? deps_scene(scene) : -1;
+    if (s >= 0 && dzones) {
+        const DZone *z = &dzones[dscene_zone[s]];
+        snprintf(out, cap, "%.*s", (int)z->len, dnames + z->name);
+    } else {
+        snprintf(out, cap, "%s", scene ? scene : "");
+    }
 }
 
 /* ---------------------------------------------------------------------------------------------- the bucket */
@@ -532,8 +572,38 @@ static void visit_close(void) {   /* (mu held; a scene's visit ends: its opens i
     visit_scene[0] = 0;
 }
 
+static char zone_now[SCENE_MAX];
+static asset_zone_cb zone_cb;
+void asset_prefetch_on_zone(asset_zone_cb cb) { __atomic_store_n(&zone_cb, cb, __ATOMIC_RELEASE); }
+/* Whether the current zone, or a zone it leads to, reads path (a romfs path); 1 when not known (no zones in the map) */
+int asset_prefetch_zone_wanted(const char *path) {
+    if (!path) return 1;
+    const size_t n = strlen(path);
+    pthread_mutex_lock(&mu);
+    int known = 0, want = 0;
+    const int s = scene_now[0] ? deps_scene(scene_now) : -1;
+    if (s >= 0 && dzones) {
+        known = 1;
+        const uint32_t own = dscene_zone[s];
+        for (uint32_t k = 0; !want && k <= dzones[own].ncount; k++) {
+            const DZone *z = &dzones[k == 0 ? own : dznbrs[dzones[own].nfirst + k - 1]];
+            for (uint32_t f = 0; !want && f < z->fcount; f++) {
+                const uint32_t pi = dzfiles[z->ffirst + f];
+                want = dpaths[2 * pi + 1] == n && !memcmp(dnames + dpaths[2 * pi], path, n);
+            }
+        }
+    }
+    pthread_mutex_unlock(&mu);
+    return known ? want : 1;
+}
+
+/* The game's current zone (its scene's: asset_prefetch_scene_now), "" before the first */
+const char *asset_prefetch_zone_now(void) { return zone_now; }
+
 void asset_prefetch_scene(const char *scene) {
     if (!scene || !scene[0]) return;
+    char old_zone[SCENE_MAX], new_zone[SCENE_MAX];
+    old_zone[0] = new_zone[0] = 0;
     pthread_mutex_lock(&mu);
     if (strcmp(scene, scene_now)) {
         window_log(scene_loading[0] ? scene_loading : scene_now);   /* (the window that ends: the load just seen, if any) */
@@ -545,8 +615,20 @@ void asset_prefetch_scene(const char *scene) {
         scene_loading[0] = 0;
         if (on_stats) hos_log("io: scene %s", scene);
         event("", scene);
+        zone_of(scene, new_zone, sizeof new_zone);
+        if (strcmp(new_zone, zone_now)) {   /* (a zone change: told once, after the lock, so the callback may call in) */
+            snprintf(old_zone, sizeof old_zone, "%s", zone_now);
+            snprintf(zone_now, sizeof zone_now, "%s", new_zone);
+        } else {
+            new_zone[0] = 0;
+        }
     }
     pthread_mutex_unlock(&mu);
+    const asset_zone_cb cb = __atomic_load_n(&zone_cb, __ATOMIC_ACQUIRE);
+    if (new_zone[0]) {
+        if (on_stats) hos_log("io: zone %s", new_zone);
+        if (cb) cb(old_zone, new_zone);
+    }
 }
 
 void asset_prefetch_open(const char *path, int fd, uint64_t base, uint64_t size) {
@@ -620,8 +702,11 @@ void asset_prefetch_disk(int fd, uint64_t base, uint32_t bytes, double ms) {
     pthread_mutex_unlock(&mu);
 }
 
-/* The game's current scene as last told (a break's report: host/ps5/ps5_bug_report.c); "" before the first */
-const char *asset_prefetch_scene_now(void) { return scene_now; }
+/* The game's current scene as last told (a break's report: host/ps5/ps5_bug_report.c); before the first, the one whose
+   parameters were last opened (its load); "" before either */
+const char *asset_prefetch_scene_now(void) {
+    return scene_now[0] ? scene_now : scene_loading;
+}
 
 void asset_prefetch_stats(AssetPrefetchStats *out) {
     pthread_mutex_lock(&mu);

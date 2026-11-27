@@ -13,6 +13,7 @@
 #include <windows.h>
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
 #include "../gpu/vk/compat/longshot_env.h"
+#include "asset_tags.h"
 #endif
 
 /* (longshot, #1468) A game folder whose deepest file passes 260 characters (MAX_PATH: "E:\Games\...\romfs\Event\EventSetting\
@@ -458,6 +459,9 @@ static uint64_t read_at(Ctx *c, uint64_t id, int64_t off, uint64_t buf, uint64_t
             hos_log("fs: read into watched memory: %s at %lld, %llu bytes to %#llx", fh->path, (long long)off,
                     (unsigned long long)done, (unsigned long long)buf);
     }
+#ifdef __PROSPERO__
+    if (done && !fh->writable) asset_tags_read(buf, done, fh->path);   /* (which file these bytes are: host/asset_tags.h) */
+#endif
     return done;
 }
 

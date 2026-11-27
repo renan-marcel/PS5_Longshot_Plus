@@ -63,6 +63,7 @@ static DWORD hos_game_path_a(char *out, DWORD size) {   /* (host/hos_paths.h: th
     snprintf(out, size, "%s", "''' + exe + r'''");
     return (DWORD)strlen(out);
 }
+static int env_read;   /* (hos_main.c's: the file was read, for the PS5's break report) */
 ''' + fn + r'''
 static int is(const char *name, const char *want) {
     const char *v = getenv(name);

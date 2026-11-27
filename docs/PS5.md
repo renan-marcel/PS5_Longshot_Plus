@@ -122,6 +122,27 @@ capture armed by a program's first dispatch) and `RX_VK_DRAW_STATS_ADDRS`. The c
 invocations only where the driver offers them (`meshShaderQueries`): RADV does not on the console, and a query pool made with
 those counts all the same hung the GPU at the first capture.
 
+## What the console writes for a report
+
+stderr goes to the console's kernel log only, so what a person is asked to send back is written to files of its own,
+`<title folder>/logs/<name>` (`host/ps5/ps5_logfile.c`, 1 MB each, started over when already full):
+
+- **`logs/memory.txt`:** the console's memory and the renderer's, one line at each zone change (`why=zone`), 5 s after it
+  (`after`), every minute (`tick`) and just before a memory floor exit (`floor`): scene, zone, free memory and its largest
+  piece, the game's committed pages, the prefetch's bytes, zone_boost, the renderer's VMA blocks and allocations,
+  textures and mirrors. 5 s after a zone change one `tags` line counts the textures by the romfs file they came from
+  (`host/asset_tags.h`): tagged, untagged, and tagged with a file the new zone and its neighbours do not read, which is
+  what a purge at a zone change could free. Nothing is freed by it.
+- **`logs/nfp.txt`:** the amiibo calls (`docs/amiibo.md`).
+- **`bug-reports/<UTC date>_<time>_<kind>/`:** a break's report, its `log.txt` the log's last 64 KB (kept from every
+  thread, `host/hos_thread.c` hos_vlog), `report.txt` with the scene, the memory floor in use and whether
+  `longshot_env.txt` was read.
+
+**Without `longshot_env.txt`** (a title folder copied without it) the title used the PC's defaults (a 220 MiB floor,
+textures up to 2048), which ran a base PS5 out of memory. Now the base profile's safe values apply then (floor 400 MiB,
+textures 512, reserve 1800 MiB, `HOS_PS5_TEX_RESERVE_MB`), the log says the file is missing, and the report says so.
+Copy the whole title folder, `longshot_env.txt` with it.
+
 ## Frame generation
 
 With [PS5_MihawkGen](https://github.com/mihawk-99/PS5_MihawkGen) checked out beside this repository (`PS5_MIHAWKGEN` names

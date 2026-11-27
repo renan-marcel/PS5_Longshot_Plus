@@ -51,6 +51,7 @@
 #define ZSTD_STATIC_LINKING_ONLY
 #include "zstd.h"
 #include "zstd_errors.h"
+#include "asset_tags.h"
 
 #define ZS_STREAMS 64   /* stream objects decoding on the host at once (the game has a few decode threads) */
 #define ZS_DICTS 64     /* libzstd DDicts kept for the game's */
@@ -311,6 +312,12 @@ static int32_t zs_chunk(ZSTD_DCtx *z, uint64_t g, uint64_t src, int32_t n) {
 
 /* (nx2/oot_patches.py: first in f_80115c80) 1 when the call was done here, x0 its result */
 int hos_zstd_stream(Ctx *c) {
+#ifdef __PROSPERO__
+    if (c->x[0] && hos_guest_range(c->x[0], 24)) {   /* (the output this call may write comes from its input's file: host/asset_tags.h) */
+        const int32_t room = (int32_t)S_ROOM(c->x[0]);
+        if (room > 0) asset_tags_derived(c->x[1], S_DST(c->x[0]), (uint64_t)room);
+    }
+#endif
     const int mode = zs_mode();
     if (!mode) return 0;
     const uint64_t g = c->x[0], src = c->x[1], ddict = c->x[3];

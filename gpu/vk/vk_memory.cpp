@@ -3371,6 +3371,8 @@ bool sparse_bind_infos(std::vector<VkSparseBufferMemoryBindInfo>& infos, uint64_
     return res == VK_SUCCESS;
 }
 } // namespace
+/// (longshot, PS5's logs/memory.txt: vk_vma.cpp rx_vk_memory_stats) the mirrors' VRAM now
+uint64_t mirror_bytes_now() { return __atomic_load_n(&mirror_bytes, __ATOMIC_RELAXED); }
 /// (longshot, RX_VK_MIRROR_SPARSE) The wait a submission of recordings takes for the sparse mirrors' binds before it, on the
 /// GPU; false: none yet (dev.present_mu held, as the binds are made)
 bool memory_sparse_wait(VkSemaphoreSubmitInfo* w) {
@@ -3979,33 +3981,71 @@ struct DeadImport { VkBuffer buffer; VkDeviceMemory memory; uint64_t value; uint
 std::deque<DeadImport> dead_imports;
 
 extern std::deque<std::map<uint64_t, Pool>::node_type> evicted_pools;   // (imports_give_back's, below)
-int memory_guest_imported(uint64_t lo, uint64_t hi) {
-    if (hi <= lo) return 0;
-    std::lock_guard lk(pools_mu);
+/// Every import the GPU may still use that overlaps [lo, hi), each as its own span to seen(span_lo, span_hi), which returns
+/// true to stop; true when it stopped. Every kind is here, and only here: memory_guest_imported and memory_guest_discard
+/// both ask it (pools_mu and bg_mu held, in that order)
+template <class Seen>
+bool import_spans_locked(uint64_t lo, uint64_t hi, Seen&& seen) {
     auto it = imported.lower_bound(hi);   // (pools by lo: those starting below hi, the last ones checked first)
     while (it != imported.begin()) {
         --it;
-        if (it->second.hi > lo) return 1;
+        if (it->second.hi > lo && seen(it->second.lo, it->second.hi)) return true;
         if (import_reach::beyond(live_reach, it->second.lo, lo)) break;   // (none further down reaches lo: import_reach.h)
     }
     for (const auto& nh : retired_pools)
-        if (nh.mapped().memory && nh.mapped().lo < hi && lo < nh.mapped().hi) return 1;
+        if (nh.mapped().memory && nh.mapped().lo < hi && lo < nh.mapped().hi && seen(nh.mapped().lo, nh.mapped().hi)) return true;
     // (longshot, 11-13) and the idle pools given back (imports_give_back) whose memory is not freed yet: waiting for the GPU, or
     // for their wait on AMD and Intel. Not counted, the game's freed pages under them were decommitted while the driver still
     // had them imported, which faulted the device (hos_mem.c FreeMemoryPages)
     for (const auto& nh : evicted_pools)
-        if (nh.mapped().memory && nh.mapped().lo < hi && lo < nh.mapped().hi) return 1;
+        if (nh.mapped().memory && nh.mapped().lo < hi && lo < nh.mapped().hi && seen(nh.mapped().lo, nh.mapped().hi)) return true;
     for (const auto& pending : dead_imports)
-        if (pending.lo < hi && lo < pending.lo + pending.bytes) return 1;
-
+        if (pending.lo < hi && lo < pending.lo + pending.bytes && seen(pending.lo, pending.lo + pending.bytes)) return true;
     // The worker imports outside pools_mu. It moves a range from inflight to ready under bg_mu;
     // bg_drain moves it from ready to the active map while holding pools_mu.
-    std::lock_guard bg_lock(bg_mu);
     for (const auto& [start, end] : bg_inflight)
-        if (start < hi && lo < end) return 1;
+        if (start < hi && lo < end && seen(start, end)) return true;
     for (const auto& [start, p] : bg_ready)
-        if (start < hi && lo < p.hi) return 1;
-    return 0;
+        if (start < hi && lo < p.hi && seen(start, p.hi)) return true;
+    return false;
+}
+
+int memory_guest_imported(uint64_t lo, uint64_t hi) {
+    if (hi <= lo) return 0;
+    std::lock_guard lk(pools_mu);
+    std::lock_guard bg_lock(bg_mu);
+    return import_spans_locked(lo, hi, [](uint64_t, uint64_t) { return true; }) ? 1 : 0;
+}
+
+/// (longshot, PS5) [lo, hi) less every import the GPU may still use (import_spans_locked) and every pool the game still has
+/// registered (guest_pools: its mirror and its captures read the game's memory there), each run left handed to
+/// free_run(ctx, run_lo, run_hi) while pools_mu and bg_mu are still held: no import of those pages can start, on demand
+/// (pool_of under pools_mu) or in the background (bg_inflight under bg_mu), until free_run returned, so what it does to
+/// them (host/oot_heap_give_back.c: count them, or give them back to the console) the GPU cannot see. A stale pool table only
+/// leaves more out. Runs and spans are cut at 64 KiB, the host's commit unit; lo and hi are units already. The bytes left out
+uint64_t memory_guest_discard(uint64_t lo, uint64_t hi, void (*free_run)(void* ctx, uint64_t run_lo, uint64_t run_hi), void* ctx) {
+    constexpr uint64_t unit = 0x10000;
+    if (hi <= lo || (lo | hi) & (unit - 1)) return 0;
+    std::lock_guard lk(pools_mu);
+    std::lock_guard bg_lock(bg_mu);
+    std::vector<std::pair<uint64_t, uint64_t>> spans;
+    auto keep = [&](uint64_t a, uint64_t b) {   // (whole units: a span's partly covered unit is left out whole)
+        spans.emplace_back(std::max(a, lo) & ~(unit - 1), std::min((std::min(b, hi) + unit - 1) & ~(unit - 1), hi));
+        return false;
+    };
+    import_spans_locked(lo, hi, keep);
+    for (const GuestPool& p : guest_pools)
+        if (p.lo < hi && lo < p.hi) keep(p.lo, p.hi);
+    std::sort(spans.begin(), spans.end());
+    uint64_t at = lo, kept = 0;
+    for (const auto& [a, b] : spans) {   // (sorted by start; a span may lie inside or across the one before)
+        if (b <= at) continue;
+        if (a > at && free_run) free_run(ctx, at, a);
+        kept += b - std::max(a, at);
+        at = b;
+    }
+    if (at < hi && free_run) free_run(ctx, at, hi);
+    return kept;
 }
 
 bool mirror_make(Pool& pool);   // (below)

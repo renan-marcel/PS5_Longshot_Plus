@@ -29,59 +29,13 @@
 #include <ntsecapi.h>   /* (RtlGenRandom, as hos_report_run.c) */
 #endif
 
-/* ---- the [NFP] lines: the host's log, and on the PS5 logs/nfp.txt too (NFP_FILE_LOG: tests/nfp_hle_test.c sets it on the PC) */
+/* ---- the [NFP] lines: the host's log, and on the PS5 logs/nfp.txt too (host/ps5/ps5_logfile.c; NFP_FILE_LOG: tests/nfp_hle_test.c
+   sets it on the PC) */
 #if defined(__PROSPERO__) && !defined(NFP_FILE_LOG)
 #define NFP_FILE_LOG 1
 #endif
 #ifdef NFP_FILE_LOG
-#include <pthread.h>
-#include <sys/stat.h>
-#ifndef NFP_FILE_CAP
-#define NFP_FILE_CAP (1L << 20)   /* (1 MB: then one line saying so, and no more) */
-#endif
-/* the crash trace's file, <title folder>/logs/crash_trace.txt: the title folder is found as the break's report finds it */
-const char *hos_ps5_trace_path(void);   /* (host/ps5/win32_ps5.c) */
-static pthread_mutex_t file_mu = PTHREAD_MUTEX_INITIALIZER;
-static FILE *file_log;
-static int file_state;   /* (0 not opened yet, 1 open, 2 closed: none could be opened, or full) */
-
-static void file_open(void) {
-    file_state = 2;
-    const char *trace = hos_ps5_trace_path();
-    const char *cut = trace ? strstr(trace, "/logs/crash_trace.txt") : NULL;
-    char path[1024];
-    const int n = cut ? snprintf(path, sizeof path, "%.*s/logs", (int)(cut - trace), trace) : -1;
-    if (n <= 0 || (size_t)n + sizeof "/nfp.txt" > sizeof path) return;
-    (void)mkdir(path, 0777);   /* (the logs/ folder, when it is not there yet) */
-    memcpy(path + n, "/nfp.txt", sizeof "/nfp.txt");
-    file_log = fopen(path, "a");
-    if (!file_log) return;
-    fseek(file_log, 0, SEEK_END);
-    if (ftell(file_log) >= NFP_FILE_CAP) {   /* (full from the runs before: this run's lines start it over) */
-        fclose(file_log);
-        file_log = fopen(path, "w");
-        if (!file_log) return;
-    }
-    file_state = 1;
-}
-
-static void file_line(const char *line) {
-    pthread_mutex_lock(&file_mu);
-    if (!file_state) file_open();
-    if (file_state == 1) {
-        fputs(line, file_log);
-        fputc('\n', file_log);
-        if (ftell(file_log) >= NFP_FILE_CAP) {
-            fputs("[NFP] nfp.txt is full (1 MB): no more lines in it this run (they are still in the log)\n", file_log);
-            fclose(file_log);
-            file_log = NULL;
-            file_state = 2;
-        } else {
-            fflush(file_log);
-        }
-    }
-    pthread_mutex_unlock(&file_mu);
-}
+void hos_ps5_logfile(const char *name, const char *line);   /* (host/ps5/ps5_logfile.c) */
 #endif
 
 #if defined(__GNUC__)
@@ -95,7 +49,7 @@ static void nfp_log(const char *fmt, ...) {
     va_end(ap);
     hos_log("%s", line);
 #ifdef NFP_FILE_LOG
-    file_line(line);
+    hos_ps5_logfile("nfp.txt", line);
 #endif
 }
 
