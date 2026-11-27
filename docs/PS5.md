@@ -1,8 +1,9 @@
 # Hookshot on the PS5
 
 This fork builds Hookshot (the static recompilation of *The Legend of Zelda: Ocarina of Time* for Nintendo Switch 2)
-as a native PS5 title, **PPSA99198**, on my homebrew stack: Mesa's RADV from
-[PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan) and the platform layer of my
+as a native PS5 title, **PPSA99198**, on my homebrew stack: Mesa's RADV from my
+[PS5_Mesa](https://github.com/renan-marcel/PS5_Mesa) fork, built by
+[PS5_Vulkan](https://github.com/renan-marcel/PS5_Vulkan), and the platform layer of my
 [PS5_PayloadSDK](https://github.com/renan-marcel/PS5_PayloadSDK) fork. Upstream is
 [NotRexed/Hookshot](https://github.com/NotRexed/Hookshot) (the `upstream` remote); everything else here is upstream's.
 

@@ -60,7 +60,7 @@ PS5_Vulkan builds RADV from PS5_Mesa and needs the payload SDK. PS5_Hookshot bet
 
 | Project | Revision |
 |---|---|
-| PS5_Mesa | `0f86253f674c425052948eb3cb116c81e646a734` |
+| PS5_Mesa ([renan-marcel/PS5_Mesa](https://github.com/renan-marcel/PS5_Mesa)) | `0f86253f674c425052948eb3cb116c81e646a734` |
 | PS5_PayloadSDK ([renan-marcel/PS5_PayloadSDK](https://github.com/renan-marcel/PS5_PayloadSDK)) | `88d6e41ec7ee7e76d871ff14cd78b5cc4c8e5989` |
 | PS5_MihawkGen (frame generation) | `c57232a9f16bcb6df5fe07c9bb631518f2b1cc0e` |
 

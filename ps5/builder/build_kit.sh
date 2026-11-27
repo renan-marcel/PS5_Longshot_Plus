@@ -19,6 +19,7 @@
 set -euo pipefail
 
 MESA_REV=0f86253f674c425052948eb3cb116c81e646a734
+MESA_REPO=https://github.com/renan-marcel/PS5_Mesa.git
 SDK_REV=88d6e41ec7ee7e76d871ff14cd78b5cc4c8e5989
 SDK_REPO=https://github.com/renan-marcel/PS5_PayloadSDK.git
 MIHAWKGEN_REV=c57232a9f16bcb6df5fe07c9bb631518f2b1cc0e
@@ -101,13 +102,15 @@ note "PS5_Vulkan: $(git -C "$vulkan" rev-parse --short HEAD) (the submodule)"
 project() {   # name revision [clone options]
     local name=$1 revision=$2 path="$projects/$1" repo="https://github.com/mihawk-99/$1.git"
     shift 2
-    if [[ $name == PS5_PayloadSDK ]]; then
+    if [[ $name == PS5_Mesa ]]; then
+        repo=$MESA_REPO
+    elif [[ $name == PS5_PayloadSDK ]]; then
         repo=$SDK_REPO
     fi
     if [[ ! -d $path/.git ]]; then
         note "$name: cloning"
         git clone -q "$@" "$repo" "$path"
-    elif [[ $name == PS5_PayloadSDK ]]; then
+    elif [[ $name == PS5_Mesa || $name == PS5_PayloadSDK ]]; then
         git -C "$path" remote set-url origin "$repo"
     fi
     git -C "$path" cat-file -e "$revision^{commit}" 2> /dev/null || git -C "$path" fetch -q origin
