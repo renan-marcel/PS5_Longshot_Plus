@@ -14,8 +14,9 @@ def main():
     parser.add_argument("--cxx", default="g++")
     args = parser.parse_args()
     source = (ROOT / "gpu/vk/vk_memory.cpp").read_text(encoding="utf-8")
-    start = source.index("int memory_guest_imported(")
-    function = source[start:source.index("\n}", start) + 2]
+    # (the scan every kind of import shares, then the check that asks it: vk_memory.cpp keeps them together)
+    start = source.index("template <class Seen>\nbool import_spans_locked(")
+    function = source[start:source.index("\n}", source.index("int memory_guest_imported(", start)) + 2]
     fixture = r"""
 #include <cassert>
 #include <cstdint>
@@ -23,9 +24,11 @@ def main():
 #include <map>
 #include <mutex>
 #include <vector>
+#include "import_reach.h"
 
 struct Pool { uint64_t lo, hi, memory; };
 std::map<uint64_t, Pool> imported;
+import_reach::Reach live_reach;   // (none counted: each scan stops after the first pool below hi)
 std::deque<decltype(imported)::node_type> retired_pools, evicted_pools;
 std::mutex pools_mu, bg_mu;
 std::map<uint64_t, uint64_t> bg_inflight;
@@ -59,7 +62,7 @@ int main() {
         cpp = Path(tmp) / "check.cpp"
         exe = Path(tmp) / "check.exe"
         cpp.write_text(fixture, encoding="utf-8")
-        subprocess.run([args.cxx, "-std=c++17", str(cpp), "-o", str(exe)], check=True)
+        subprocess.run([args.cxx, "-std=c++20", "-I", str(ROOT / "gpu/vk"), str(cpp), "-o", str(exe)], check=True)
         subprocess.run([str(exe)], cwd=tmp, check=True)
 
 

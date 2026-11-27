@@ -25,7 +25,7 @@ def source_contracts():
     assert 'if (open_now.load()) refresh_outputs();' in tick, 'Refresh on explicit menu opening'
     assert 'r.value != &output_pick' in menu and 'audio_output_device_id=%s' in menu
     assert 'output_forced()' in menu and 'audio_output_device_name' in menu
-    assert '#define MKWVK_API_VERSION 25' in api
+    assert '#define MKWVK_API_VERSION 26' in api
     backend = (ROOT / 'host/rx_backend.c').read_text(encoding='utf-8')
     check_host_callbacks(api, backend)
     assert '#include "options_path.h"' in devices and 'hos_options_file()' in devices

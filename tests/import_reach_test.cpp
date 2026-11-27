@@ -81,8 +81,10 @@ static std::atomic<uint64_t> pools_gen{1};
 static std::mutex pools_mu, bg_mu;
 static std::condition_variable bg_cv, bg_done_cv;
 static std::deque<std::pair<uint64_t, uint64_t>> bg_queue;
-static std::vector<uint64_t> bg_inflight;
+static std::map<uint64_t, uint64_t> bg_inflight;
 static std::vector<std::pair<uint64_t, Pool>> bg_ready;
+struct DeadImport { uint64_t lo, bytes; };
+static std::deque<DeadImport> dead_imports;
 static int64_t st_bg_waits, st_prefetch_sent, st_prefetch_used, st_prefetch_dropped, st_async_sent, st_async_copies;
 static std::vector<Pool*> mirror_wanted, sparse_wanted;
 static uint64_t mem_rec_value = 7, mirror_epoch = 10;
@@ -95,7 +97,7 @@ static void retire_pool(std::map<uint64_t, Pool>::iterator);
 /* ACTUAL */
 
 static void reset() {
-    imported.clear(), retired_pools.clear(), evicted_pools.clear(), bg_ready.clear(), bg_queue.clear(), bg_inflight.clear();
+    imported.clear(), retired_pools.clear(), evicted_pools.clear(), bg_ready.clear(), bg_queue.clear(), bg_inflight.clear(), dead_imports.clear();
     allocations.clear(), table_sets.clear();
     overlapping_imports = bg_starts = 0;
     last_pool = nullptr;
