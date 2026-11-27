@@ -1,3 +1,3 @@
 [submodule "ps5/deps/PS5_Vulkan"]
 	path = ps5/deps/PS5_Vulkan
-	url = https://github.com/mihawk-99/PS5_Vulkan.git
+	url = https://github.com/renan-marcel/PS5_Vulkan.git
