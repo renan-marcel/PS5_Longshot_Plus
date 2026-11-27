@@ -14,11 +14,32 @@ checkout and a release's tools folder hold different sets of files, so their fin
 import hashlib
 import os
 import re
+import shutil
 import subprocess
+import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SOURCES = ("host", "gpu", "nx2")
 SOURCE_EXT = (".c", ".cc", ".cpp", ".h", ".hpp", ".inc", ".py", ".glsl", ".comp", ".vert", ".frag", ".spv")
+
+
+def git_describe(root):
+    args = ["describe", "--tags", "--always", "--dirty", "--match", "v[0-9]*"]
+    try:
+        r = subprocess.run(["git", "-C", root] + args, capture_output=True, text=True, timeout=20)
+        if r.returncode == 0:
+            return r.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    # WSL's git cannot resolve a Windows worktree's .git pointer; Git for Windows can resolve its own pointer.
+    git_exe = shutil.which("git.exe")
+    if not git_exe:
+        return ""
+    try:
+        r = subprocess.run([git_exe] + args, cwd=root, capture_output=True, text=True, timeout=20)
+        return r.stdout.strip() if r.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
 
 
 def release(root=ROOT):
@@ -33,12 +54,7 @@ def release(root=ROOT):
             if name:
                 break
     if not name and os.path.exists(os.path.join(root, ".git")):
-        try:
-            r = subprocess.run(["git", "-C", root, "describe", "--tags", "--always", "--dirty", "--match", "v[0-9]*"],
-                               capture_output=True, text=True, timeout=20)
-            name = r.stdout.strip() if r.returncode == 0 else ""
-        except (OSError, subprocess.SubprocessError):
-            pass
+        name = git_describe(root)
     return name or "unknown"
 
 
@@ -69,4 +85,9 @@ def define(root=ROOT):
 
 
 if __name__ == "__main__":
-    print(describe())
+    if sys.argv[1:] == ["--release"]:
+        print(release())
+    elif not sys.argv[1:]:
+        print(describe())
+    else:
+        sys.exit("usage: python -I nx2/version.py [--release]")

@@ -59,6 +59,15 @@ deps="$root/.local/ps5-deps"
 mkdir -p "$logs" "$deps/downloads" "$projects"
 cd "$root"
 
+# The runtime object is compiled into the kit, which is later used without this checkout's .git directory.
+# WSL cannot read a Windows worktree's .git pointer; version.py falls back to Git for Windows in that case.
+if [[ -z ${LONGSHOT_VERSION:-} || $LONGSHOT_VERSION == unknown ]]; then
+    unset LONGSHOT_VERSION
+    LONGSHOT_VERSION=$(python3 -I nx2/version.py --release) || die "cannot determine Longshot's version from this checkout"
+fi
+[[ -n $LONGSHOT_VERSION && $LONGSHOT_VERSION != unknown ]] || die "cannot determine Longshot's version from this checkout"
+export LONGSHOT_VERSION
+
 run() {   # log-name command...: quiet while it works, the end of its log when it fails
     local log="$logs/$1.log" start=$SECONDS
     shift
