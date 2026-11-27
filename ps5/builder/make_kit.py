@@ -33,6 +33,13 @@ def copy(src, dst):
     shutil.copy2(src, dst)
 
 
+def git_output(repo, *args):
+    r = subprocess.run(["git", "-C", repo] + list(args), capture_output=True, text=True)
+    if r.returncode and shutil.which("git.exe"):
+        r = subprocess.run(["git.exe"] + list(args), cwd=repo, capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
 def tracked(*paths):
     """the files git has under paths (no build leftovers)"""
     out = subprocess.run(["git", "-C", ROOT, "ls-files", "-z", "--"] + list(paths), capture_output=True, check=True).stdout
@@ -52,6 +59,15 @@ def main():
     missing = [o for o in objects if not os.path.exists(o) or not os.path.exists(o + ".key")]
     if missing:
         sys.exit("make_kit: compile the kit's objects first (ps5/build.py --kit): %s" % missing[:3])
+    release = b.version.release(ROOT)
+    if release == "unknown":
+        sys.exit("make_kit: cannot package a runtime with an unknown version; build from a tagged checkout or set LONGSHOT_VERSION")
+    expected_stamp = b.version.describe(ROOT).encode("ascii")
+    runtime_object = next(o for o in objects if os.path.basename(o) == "host_hos_main.o")
+    with open(runtime_object, "rb") as f:
+        if expected_stamp not in f.read():
+            sys.exit("make_kit: host_hos_main.o does not contain the expected version stamp %s; rebuild with ps5/build.py --kit"
+                     % expected_stamp.decode("ascii"))
     if os.path.exists(kit):
         shutil.rmtree(kit)
     os.makedirs(kit)
@@ -157,12 +173,12 @@ printf '%s\0' "${radv_link_inputs[@]}"
     if b.HAS_MIHAWKGEN:
         copy(b.MIHAWKGEN_NETWORK, os.path.join(kit, "title", "framegen", "network.fgw"))
 
-    rev = lambda d: subprocess.run(["git", "-C", d, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    rev = lambda d: git_output(d, "rev-parse", "HEAD")
     title_id = json.load(open(os.path.join(ROOT, "ps5", "sce_sys", "param.json")))["titleId"]
     info = {
         "format": 1,
         "title_id": title_id,
-        "longshot": subprocess.run(["git", "-C", ROOT, "describe", "--tags", "--always", "--dirty"], capture_output=True, text=True).stdout.strip(),
+        "longshot": release,
         "revisions": {"PS5_Longshot": rev(ROOT), "PS5_Vulkan": rev(vulkan), "PS5_MihawkGen": rev(b.MIHAWKGEN) if b.HAS_MIHAWKGEN else ""},
         "compiler": subprocess.run([clang, "--version"], capture_output=True, text=True).stdout.splitlines()[0],
         # (the SDK wrapper's part, PS5_Vulkan tooling/prospero-clang18, then build.py's)

@@ -19,7 +19,9 @@
 set -euo pipefail
 
 MESA_REV=0f86253f674c425052948eb3cb116c81e646a734
-SDK_REV=55a2de04e3364f0a6c8d6c337dc95436cf091ef0
+MESA_REPO=https://github.com/renan-marcel/PS5_Mesa.git
+SDK_REV=88d6e41ec7ee7e76d871ff14cd78b5cc4c8e5989
+SDK_REPO=https://github.com/renan-marcel/PS5_PayloadSDK.git
 MIHAWKGEN_REV=c57232a9f16bcb6df5fe07c9bb631518f2b1cc0e
 # (the headers gpu/vk is compiled with: scripts/linux/deps.sh's pins, which ps5/build.py names)
 VK_HEADERS=v1.4.345 SPIRV_HEADERS=vulkan-sdk-1.4.341.0 VMA=v3.3.0
@@ -56,6 +58,15 @@ logs="$root/work/build-kit"
 deps="$root/.local/ps5-deps"
 mkdir -p "$logs" "$deps/downloads" "$projects"
 cd "$root"
+
+# The runtime object is compiled into the kit, which is later used without this checkout's .git directory.
+# WSL cannot read a Windows worktree's .git pointer; version.py falls back to Git for Windows in that case.
+if [[ -z ${LONGSHOT_VERSION:-} || $LONGSHOT_VERSION == unknown ]]; then
+    unset LONGSHOT_VERSION
+    LONGSHOT_VERSION=$(python3 -I nx2/version.py --release) || die "cannot determine Longshot's version from this checkout"
+fi
+[[ -n $LONGSHOT_VERSION && $LONGSHOT_VERSION != unknown ]] || die "cannot determine Longshot's version from this checkout"
+export LONGSHOT_VERSION
 
 run() {   # log-name command...: quiet while it works, the end of its log when it fails
     local log="$logs/$1.log" start=$SECONDS
@@ -98,11 +109,18 @@ vulkan="$root/ps5/deps/PS5_Vulkan"
 [[ -f $vulkan/tools/radv-link.sh ]] || die "the PS5_Vulkan submodule is not there (git submodule update --init ps5/deps/PS5_Vulkan)"
 note "PS5_Vulkan: $(git -C "$vulkan" rev-parse --short HEAD) (the submodule)"
 project() {   # name revision [clone options]
-    local name=$1 revision=$2 path="$projects/$1"
+    local name=$1 revision=$2 path="$projects/$1" repo="https://github.com/mihawk-99/$1.git"
     shift 2
+    if [[ $name == PS5_Mesa ]]; then
+        repo=$MESA_REPO
+    elif [[ $name == PS5_PayloadSDK ]]; then
+        repo=$SDK_REPO
+    fi
     if [[ ! -d $path/.git ]]; then
         note "$name: cloning"
-        git clone -q "$@" "https://github.com/mihawk-99/$name.git" "$path"
+        git clone -q "$@" "$repo" "$path"
+    elif [[ $name == PS5_Mesa || $name == PS5_PayloadSDK ]]; then
+        git -C "$path" remote set-url origin "$repo"
     fi
     git -C "$path" cat-file -e "$revision^{commit}" 2> /dev/null || git -C "$path" fetch -q origin
     git -C "$path" cat-file -e "$revision^{commit}" 2> /dev/null || die "$path does not have $revision"
