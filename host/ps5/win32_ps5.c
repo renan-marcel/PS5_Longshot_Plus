@@ -77,6 +77,7 @@ static int window_reserved;
 static pthread_mutex_t window_lock = PTHREAD_MUTEX_INITIALIZER;
 static int64_t block_next, block_end;         /* direct memory of the current block not mapped yet */
 static uint64_t committed_bytes;
+static uint64_t reused_bytes, decommitted_bytes;   /* (window_lock: commits taken from free_units, and all given back to it) */
 
 static int in_window(uintptr_t lo, uintptr_t hi) { return lo >= HOS_PS5_GUEST_LO && hi <= HOS_PS5_GUEST_HI && lo < hi; }
 
@@ -170,6 +171,7 @@ static int commit_units(uintptr_t lo, uintptr_t hi) {
                 while (k < need / UNIT && k < free_count && free_units[free_count - 1 - k] == free_units[free_count - k] - (int64_t)UNIT) k++;
                 free_count -= k;
                 phys = free_units[free_count], got = k * UNIT;
+                __atomic_add_fetch(&reused_bytes, got, __ATOMIC_RELAXED);   /* (logs/memory.txt's "pool" line) */
             } else phys = direct_take(need, &got);
             if (phys < 0) return 0;   /* (commit_units_wait says so) */
             void *want = (void *)(HOS_PS5_GUEST_LO + u * UNIT);
@@ -270,6 +272,7 @@ int hos_ps5_decommit(void *addr, size_t size) {
         }
         for (uint64_t k = 0; k < n; k++) free_units[free_count++] = unit_phys[u + k];
         committed_bytes -= n * UNIT;
+        __atomic_add_fetch(&decommitted_bytes, n * UNIT, __ATOMIC_RELAXED);
         units += n;
         at += n * UNIT;
     }
@@ -1327,6 +1330,22 @@ static void mem_write(const char *why, uint64_t room, uint64_t started_ms) {
                 room >> 20, (uint64_t)largest >> 20, __atomic_load_n(&committed_bytes, __ATOMIC_RELAXED) >> 20, ps.held_bytes >> 20,
                 __atomic_load_n(&g_zone_boost_until_ms, __ATOMIC_RELAXED) > now, renderer);
     hos_ps5_logfile("memory.txt", line);
+    {   /* (every line, the switch on or off: what an A/B of HOS_PS5_HEAP_GIVE_BACK compares) the game's pages taken again from
+           what was given back, all that was given back, and the frames */
+        void hos_vi_pace(int64_t *frames, int64_t *slow, double *worst_ms);   /* (host/nn_vi.c) */
+        int64_t frames = 0, slow = 0;
+        double worst = 0;
+        hos_vi_pace(&frames, &slow, &worst);
+        const uint64_t reused = __atomic_load_n(&reused_bytes, __ATOMIC_RELAXED),   /* (no wait for window_lock: a floor exit's) */
+                       given = __atomic_load_n(&decommitted_bytes, __ATOMIC_RELAXED);
+        snprintf(line, sizeof line, "pool reused_mb=%llu decommitted_mb=%llu frames=%lld slow_frames=%lld worst_ms=%.1f",
+                 (unsigned long long)(reused >> 20), (unsigned long long)(given >> 20), (long long)frames, (long long)slow, worst);
+        hos_ps5_logfile("memory.txt", line);
+        int hos_oot_heap_line(char *out, size_t cap), hos_oot_heap_top(char *out, size_t cap, int k);   /* (host/oot_heap_give_back.c) */
+        if (hos_oot_heap_line(line, sizeof line) > 0) hos_ps5_logfile("memory.txt", line);
+        if ((!strcmp(why, "after") || !strcmp(why, "floor")) && hos_oot_heap_top(line, sizeof line, 12) > 5)
+            hos_ps5_logfile("memory.txt", line);
+    }
     extern int rx_vk_tags_wanted __attribute__((weak));   /* (gpu/vk/vk_texture.cpp: the renderer counts on its own thread) */
     if (!strcmp(why, "after") && &rx_vk_tags_wanted) __atomic_store_n(&rx_vk_tags_wanted, 1, __ATOMIC_RELEASE);
 }

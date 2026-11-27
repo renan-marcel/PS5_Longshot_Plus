@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 25
+#define MKWVK_API_VERSION 26
 enum { HOS_OPT_CHEAT_HEARTS = 32, HOS_OPT_CHEAT_FLIGHT, HOS_OPT_CHEAT_ACTION, HOS_OPT_CHEAT_CAMERA, HOS_OPT_CHEAT_SPEED };
 /* (longshot) the Gameplay tab's Text size (host/oot_text_size.c): 0 the game's, 1 110%, 2 125%, 3 150%, 4 175% */
 enum { HOS_OPT_TEXT_SIZE = 10 };
@@ -286,6 +286,9 @@ typedef struct MkwVkRenderer {
     void (*nvn_pool_created)(uint64_t gpu, uint64_t size);   /* a memory pool made (non-virtual): imported early */
     /* whether the GPU may use guest memory in [lo, hi) through an import (the host keeps such pages committed) */
     int (*guest_imported)(uint64_t lo, uint64_t hi);
+    /* (PS5) [lo, hi) (whole 64 KiB units) less what an import holds, each run left handed to free_run while no import can
+       start in it (host/oot_heap_give_back.c): the bytes an import holds */
+    uint64_t (*guest_discard)(uint64_t lo, uint64_t hi, void (*free_run)(void *ctx, uint64_t run_lo, uint64_t run_hi), void *ctx);
     /* virtual pages [gpu, gpu + size) mapped now are about to be unmapped or remapped (the old mapping still in place):
        what the GPU wrote into textures there goes into their memory first */
     void (*nvn_vmap_changing)(uint64_t gpu, uint64_t size);
