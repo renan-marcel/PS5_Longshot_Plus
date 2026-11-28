@@ -190,10 +190,10 @@ def jobs_for(rt64, gen_dir):
     # Native Vulkan AMD FSR 4.1.2 static compute-replay backend (gpu/vk/fsr4/fsr411.cpp, GPL-2.0-or-later)
     out.append((os.path.join(VK, "fsr4", "fsr411.cpp"), os.path.join(OUT, "obj", "fsr4_fsr411.o"),
                 vfl + ["-include", os.path.join(VK, "vk_loader.h"), "-I" + os.path.join(VK, "fsr4")], vk_digest))
-    # mem_arena POSIX backend (libs/mem_arena/src/os_mem_posix.cpp) for LONGSHOT_ZONE_SCRATCH_ARENA
+    # mem_arena PS5 backend (libs/mem_arena/src/os_mem_ps5.cpp) for LONGSHOT_ZONE_SCRATCH_ARENA
     mem_arena_inc = os.path.join(ROOT, "libs", "mem_arena", "include")
-    out.append((os.path.join(ROOT, "libs", "mem_arena", "src", "os_mem_posix.cpp"),
-                os.path.join(OUT, "obj", "mem_arena_os_mem_posix.o"),
+    out.append((os.path.join(ROOT, "libs", "mem_arena", "src", "os_mem_ps5.cpp"),
+                os.path.join(OUT, "obj", "mem_arena_os_mem_ps5.o"),
                 COMMON + [MKDIR, "-I" + POSIX, "-D_GNU_SOURCE", "-std=c++20", "-O2", "-DNDEBUG", "-I" + mem_arena_inc],
                 tree_digest(mem_arena_inc)))
     if HAS_MIHAWKGEN:   # (its Vulkan calls through the back end's loaded pointers: vk_loader.h, as every unit of gpu/vk)
