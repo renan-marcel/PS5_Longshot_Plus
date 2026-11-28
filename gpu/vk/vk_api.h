@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 26
+#define MKWVK_API_VERSION 27
 enum { HOS_OPT_CHEAT_HEARTS = 32, HOS_OPT_CHEAT_FLIGHT, HOS_OPT_CHEAT_ACTION, HOS_OPT_CHEAT_CAMERA, HOS_OPT_CHEAT_SPEED };
 /* (longshot) the Gameplay tab's Text size (host/oot_text_size.c): 0 the game's, 1 110%, 2 125%, 3 150%, 4 175% */
 enum { HOS_OPT_TEXT_SIZE = 10 };
@@ -251,6 +251,8 @@ typedef struct MkwVkHost {
     void (*amiibo_select)(const uint8_t *id, const char *name);   /* the figure to touch next: its 8-byte ID and name; NULL id: none */
     void (*amiibo_touch)(int on);   /* 1: touch the selected figure, 0: remove it */
     void (*amiibo_config)(int emulation, int random_uid, int auto_touch);
+    /* (version 27) the emulated game's total and used memory, bytes (host/hos_mem.c); not the PC's RAM or GPU budget */
+    int (*memory_usage)(uint64_t *used, uint64_t *total);
 } MkwVkHost;
 
 /* One completed temporal-upscale sample; all zero while inactive. */

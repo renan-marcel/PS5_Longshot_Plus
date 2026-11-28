@@ -78,7 +78,8 @@ def main():
     fps = (vk / "vk_fps.cpp").read_text(encoding="utf-8")
     # (off and FPS: nothing measured; the Breakdown's timers only while it shows)
     pres = body(fps, "void fps_presented()")
-    need(pres.index("fs::kFrameTime") < pres.index("fps_clock()"), "fps_presented reads the clock below Frame time")
+    need(pres.index("if (level < fs::kFrameTime)") < pres.index("const int64_t now = fps_clock();"),
+         "FPS timing reads its clock below Frame time")
     need("fps_breakdown_on()" in body(fps, "FpsRender::FpsRender()"), "the renderer's timer runs while the Breakdown is off")
     need("fps_breakdown_on()" in (vk / "vk_fps.h").read_text(encoding="utf-8"), "FpsWait is not gated on the Breakdown")
     need("host->slept_ns" in pres, "the host's sleeps (pacing, OoT's present poll) are not read")
