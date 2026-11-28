@@ -32,6 +32,8 @@ typedef void (*asset_zone_cb)(const char *old_zone, const char *new_zone);
 void asset_prefetch_on_zone(asset_zone_cb cb);
 /* Whether the current zone, or a zone it leads to, reads this romfs path; 1 when it cannot be known */
 int asset_prefetch_zone_wanted(const char *path);
+/* Whether zone_idx, or a zone it leads to, reads this romfs path; 1 when it cannot be known */
+int asset_prefetch_zone_wanted_for(int zone_idx, const char *path);
 /* A file of the packs the game opened: its path (under PAK_ROMFS_ROOT) and its span. */
 void asset_prefetch_open(const char *path, int fd, uint64_t base, uint64_t size);
 /* A read of the game's in a file's span: 1 when the bucket held it (copied into buf), 0 when the caller reads the disk and

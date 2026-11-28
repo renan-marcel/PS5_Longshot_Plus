@@ -22,6 +22,8 @@
 void hos_log(const char *fmt, ...);
 /* (host/ps5/win32_ps5.c: the title's free direct memory; absent in the checks, which have memory to spare) */
 __attribute__((weak)) uint64_t hos_ps5_direct_room(void);
+extern void rx_vk_evict_unwanted_zone(int target_zone) __attribute__((weak));
+extern size_t hos_ps5_trim_free_units(size_t keep_bytes) __attribute__((weak));
 /* (host/ps5/pak_romfs.c: the packs' build id, which Data.deps must name) */
 const uint8_t *pak_romfs_build_id(void);
 
@@ -573,8 +575,36 @@ static void visit_close(void) {   /* (mu held; a scene's visit ends: its opens i
 }
 
 static char zone_now[SCENE_MAX];
+static int last_evicted_zone = -1;
 static asset_zone_cb zone_cb;
 void asset_prefetch_on_zone(asset_zone_cb cb) { __atomic_store_n(&zone_cb, cb, __ATOMIC_RELEASE); }
+
+/* Caller holds mu and guarantees dzones != NULL && own < nzones && path != NULL. */
+static int zone_wanted_locked(uint32_t own, const char *path, size_t n) {
+    int want = 0;
+    for (uint32_t k = 0; !want && k <= dzones[own].ncount; k++) {
+        const DZone *z = &dzones[k == 0 ? own : dznbrs[dzones[own].nfirst + k - 1]];
+        for (uint32_t f = 0; !want && f < z->fcount; f++) {
+            const uint32_t pi = dzfiles[z->ffirst + f];
+            want = dpaths[2 * pi + 1] == n && !memcmp(dnames + dpaths[2 * pi], path, n);
+        }
+    }
+    return want;
+}
+
+/* Whether zone_idx, or a zone it leads to, reads path (a romfs path); 1 when not known */
+int asset_prefetch_zone_wanted_for(int zone_idx, const char *path) {
+    if (zone_idx < 0 || !path) return 1;
+    const size_t n = strlen(path);
+    pthread_mutex_lock(&mu);
+    int want = 1;
+    if (deps && dzones && (uint64_t)zone_idx < nzones) {
+        want = zone_wanted_locked((uint32_t)zone_idx, path, n);
+    }
+    pthread_mutex_unlock(&mu);
+    return want;
+}
+
 /* Whether the current zone, or a zone it leads to, reads path (a romfs path); 1 when not known (no zones in the map) */
 int asset_prefetch_zone_wanted(const char *path) {
     if (!path) return 1;
@@ -584,14 +614,7 @@ int asset_prefetch_zone_wanted(const char *path) {
     const int s = scene_now[0] ? deps_scene(scene_now) : -1;
     if (s >= 0 && dzones) {
         known = 1;
-        const uint32_t own = dscene_zone[s];
-        for (uint32_t k = 0; !want && k <= dzones[own].ncount; k++) {
-            const DZone *z = &dzones[k == 0 ? own : dznbrs[dzones[own].nfirst + k - 1]];
-            for (uint32_t f = 0; !want && f < z->fcount; f++) {
-                const uint32_t pi = dzfiles[z->ffirst + f];
-                want = dpaths[2 * pi + 1] == n && !memcmp(dnames + dpaths[2 * pi], path, n);
-            }
-        }
+        want = zone_wanted_locked(dscene_zone[s], path, n);
     }
     pthread_mutex_unlock(&mu);
     return known ? want : 1;
@@ -604,6 +627,7 @@ void asset_prefetch_scene(const char *scene) {
     if (!scene || !scene[0]) return;
     char old_zone[SCENE_MAX], new_zone[SCENE_MAX];
     old_zone[0] = new_zone[0] = 0;
+    int evict_zone = -1;
     pthread_mutex_lock(&mu);
     if (strcmp(scene, scene_now)) {
         window_log(scene_loading[0] ? scene_loading : scene_now);   /* (the window that ends: the load just seen, if any) */
@@ -619,11 +643,20 @@ void asset_prefetch_scene(const char *scene) {
         if (strcmp(new_zone, zone_now)) {   /* (a zone change: told once, after the lock, so the callback may call in) */
             snprintf(old_zone, sizeof old_zone, "%s", zone_now);
             snprintf(zone_now, sizeof zone_now, "%s", new_zone);
+            const int s = deps_scene(scene);
+            if (s >= 0 && dzones) {
+                const int new_zone_idx = (int)dscene_zone[s];
+                if (new_zone_idx >= 0) {
+                    last_evicted_zone = new_zone_idx;
+                    evict_zone = new_zone_idx;
+                }
+            }
         } else {
             new_zone[0] = 0;
         }
     }
     pthread_mutex_unlock(&mu);
+    if (evict_zone >= 0 && rx_vk_evict_unwanted_zone) rx_vk_evict_unwanted_zone(evict_zone);
     const asset_zone_cb cb = __atomic_load_n(&zone_cb, __ATOMIC_ACQUIRE);
     if (new_zone[0]) {
         if (on_stats) hos_log("io: zone %s", new_zone);
@@ -637,6 +670,7 @@ void asset_prefetch_open(const char *path, int fd, uint64_t base, uint64_t size)
     const size_t root = sizeof(PAK_ROMFS_ROOT) - 1;
     const char *rel = !strncmp(path, PAK_ROMFS_ROOT, root) ? path + root : path;
     while (*rel == '/') rel++;
+    int evict_zone = -1;
     pthread_mutex_lock(&mu);
     win.opens++;
     /* (a scene's parameters opened: its load begins, before Sequence_CurrentBanc says so) */
@@ -653,10 +687,22 @@ void asset_prefetch_open(const char *path, int fd, uint64_t base, uint64_t size)
             }
             if (on_stats) hos_log("io: loading %s", scene);
             event(scene, "");
+            const int s = deps_scene(scene);
+            if (s >= 0 && dzones) {
+                const int b_zone = (int)dscene_zone[s];
+                if (b_zone >= 0 && b_zone != last_evicted_zone) {
+                    last_evicted_zone = b_zone;
+                    evict_zone = b_zone;
+                }
+            }
         }
     }
     if (on_learn && visit_scene[0] && visit.n < PROFILE_MAX) list_has_add(&visit, rel, n);
     pthread_mutex_unlock(&mu);
+    if (evict_zone >= 0) {
+        if (rx_vk_evict_unwanted_zone) rx_vk_evict_unwanted_zone(evict_zone);
+        if (hos_ps5_trim_free_units) hos_ps5_trim_free_units((size_t)-1);
+    }
 }
 
 int asset_prefetch_read(int fd, uint64_t base, uint64_t size, uint64_t from, void *buf, uint32_t n) {
