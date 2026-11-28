@@ -1665,8 +1665,11 @@ Row rows[] = {
     // Gameplay
     {TAB_GAMEPLAY, "FPS counter", &opts.show_fps, 0, fps_stats::kLevels - 1, 1, tx_fps_level,
      "Frames per second in the top right corner, and as much more as you choose.", hn_fps, false, true},
+    {TAB_GAMEPLAY, "Memory Graphy", &opts.show_memory_graph, 0, 1, 1, tx_onoff,
+     "Shows the game's used and free memory under the FPS counter, with the last minute's minimum and maximum used memory.", nullptr,
+     false, true},
     {TAB_GAMEPLAY, "FPS counter position", &opts.fps_corner, 0, 3, 1, tx_fps_corner,
-     "The corner the FPS counter shows in. While this menu is open it shows at the top right.", nullptr, false, true},
+     "The corner the FPS counter and Memory Graphy show in. While this menu is open they show at the top right.", nullptr, false, true},
     {TAB_GAMEPLAY, "FPS counter size", &opts.fps_size, 0, 3, 1, tx_fps_size,
      "How large the FPS counter is drawn. Auto grows with the window, as the menu does; Small, Medium and Large keep one size "
      "whatever the window, the size Auto has in a 720p, 1080p and 1440p window.", nullptr, false, true},
@@ -4965,6 +4968,65 @@ float fps_scale(const ui::Ctx& c) {
     return std::min(fixed[opts.fps_size - 1], c.h / 720.0f * 1.3f);
 }
 
+static float memory_graph_height(float s) { return 74 * s; }
+
+static void draw_memory_graph(ui::Ctx& c, float x0, float y, float width, float s) {
+    namespace ms = memory_graph_stats;
+    static ms::Sample samples[ms::kCapacity];
+    const int64_t now = fps_clock();
+    const ms::Summary summary = fps_memory_graph(now, samples, ms::kCapacity);
+    const float line_h = 15 * s, graph_h = 38 * s;
+    const ImU32 used_col = ui::rgba(255, 174, 76), free_col = ui::rgba(96, 190, 255);
+    const Tab lab(c.f.body, 11 * s), val(c.f.strong, 11 * s);
+    char used[24] = "-", free[24] = "-", min_used[24] = "-", max_used[24] = "-";
+    if (summary.count) {
+        ms::text(used, sizeof used, summary.current.used);
+        ms::text(free, sizeof free, summary.current.total - summary.current.used);
+        ms::text(min_used, sizeof min_used, summary.min_used);
+        ms::text(max_used, sizeof max_used, summary.max_used);
+    }
+    lab.draw(c.d, x0, y, used_col, "Used", s);
+    val.draw(c.d, x0 + width * 0.25f, y, used_col, used, s);
+    lab.draw(c.d, x0 + width * 0.52f, y, free_col, "Free", s);
+    val.draw(c.d, x0 + width - val.width(free), y, free_col, free, s);
+
+    const float gy0 = y + line_h, gy1 = gy0 + graph_h;
+    c.d->AddLine(ImVec2(x0, gy1 + 0.5f), ImVec2(x0 + width, gy1 + 0.5f), ui::rgba(255, 255, 255, 65),
+                 std::max(1.0f, s));
+    if (summary.count && summary.current.total) {
+        const auto yv = [&](uint64_t bytes) {
+            return gy1 - graph_h * std::clamp(bytes / (double)summary.current.total, 0.0, 1.0);
+        };
+        const auto dashed = [&](float yy, ImU32 color) {
+            for (float x = x0; x < x0 + width; x += 5 * s)
+                c.d->AddLine(ImVec2(x, yy), ImVec2(std::min(x + 2.5f * s, x0 + width), yy), color, std::max(1.0f, s));
+        };
+        dashed(yv(summary.min_used), ui::rgba(255, 174, 76, 100));
+        dashed(yv(summary.max_used), ui::rgba(255, 110, 85, 150));
+        static ImVec2 used_pts[ms::kCapacity], free_pts[ms::kCapacity];
+        int n = 0;
+        for (; n < summary.count; n++) {
+            const ms::Sample& sample = samples[n];
+            const float x = x0 + width * std::clamp((sample.at_ns - (now - ms::kWindowNs)) / (double)ms::kWindowNs, 0.0, 1.0);
+            const uint64_t sample_free = sample.total - sample.used;
+            used_pts[n] = ImVec2(x, yv(sample.used));
+            free_pts[n] = ImVec2(x, yv(sample_free));
+        }
+        if (n >= 2) {
+            c.d->AddPolyline(used_pts, n, used_col, ImDrawFlags_None, std::max(1.0f, 1.5f * s));
+            c.d->AddPolyline(free_pts, n, free_col, ImDrawFlags_None, std::max(1.0f, 1.5f * s));
+        }
+    } else {
+        lab.draw(c.d, x0 + 5 * s, gy0 + 10 * s, ui::kSoft, "Collecting memory samples", s);
+    }
+    const float footer_y = gy1 + 3 * s;
+    char min_text[36], max_text[36];
+    snprintf(min_text, sizeof min_text, "Min %s", min_used);
+    snprintf(max_text, sizeof max_text, "Max %s", max_used);
+    lab.draw(c.d, x0, footer_y, ui::kSoft, min_text, s);
+    lab.draw(c.d, x0 + width - lab.width(max_text), footer_y, ui::kSoft, max_text, s);
+}
+
 /// The FPS counter, in the corner the FPS counter position row chooses (the safe area's; under the banner at the top right
 /// while the menu is open, unless it fits beside the menu's column on a very wide window). The number as it always looked:
 /// green outlined bold, "FPS" small beside it, the frame generation line under them, no plate (#1957, v2.0.14's paint_fps).
@@ -4977,15 +5039,33 @@ float fps_scale(const ui::Ctx& c) {
 void draw_fps(ui::Ctx& c, bool under_banner) {
     namespace fs = fps_stats;
     int level = fs::level_of(opts.show_fps);
+    if (level == fs::kOff) {
+        if (opts.show_memory_graph) {
+            const float s = fps_scale(c), width = 208 * s, height = memory_graph_height(s);
+            int corner = std::clamp(opts.fps_corner, 0, 3);
+            const bool beside = menu_ox >= width + 2 * c.safe + 8 * s;
+            if (under_banner && !tune_mode && !beside) corner = 0;
+            const bool left = (corner & 1) != 0, bottom = corner >= 2;
+            const float x0 = left ? c.safe : c.w - c.safe - width;
+            const float clock_pad = (!bottom && !left && !under_banner && opts.show_clock > 0) ? 24 * s : 0.0f;
+            const float top = bottom ? c.h - c.safe - height
+                                     : under_banner && !tune_mode ? banner_h(c) + 10 * s : c.safe + clock_pad;
+            draw_memory_graph(c, x0, top, width, s);
+        }
+        return;
+    }
     const float s = fps_scale(c), big = 28 * s, small = 13 * s, label = 12 * s;
     const ImU32 green = ui::rgba(72, 255, 110), ink = ui::kInkBright, dim = ui::kSoft, soft = ui::kInk;
     const Tab num(c.f.strong, big), tab(c.f.strong, small), lab(c.f.strong, label);
     const float nw = num.width(fps_text), lw = ui::size_of(c.f.strong, small, "FPS").x;
     const float sw = fps_sub[0] ? tab.width(fps_sub) : 0;
     const float gw = (fs::level_of(opts.show_fps) >= fs::kBreakdown ? 280 : 208) * s;   // (the column's width from the graph on; wider with the lanes)
+    const bool memory_graph = opts.show_memory_graph != 0;
     // (while the menu is open: the top right under the banner, the number and the frame time only, unless the window is so much
     // wider than 16:9 that the column fits beside the menu's, in its own corner)
-    const bool beside = menu_ox >= (level >= fs::kGraph ? gw : nw + lw) + 2 * c.safe + 8 * s;
+    const float used_width = memory_graph ? std::max(gw, level >= fs::kGraph ? gw : nw + lw)
+                                          : (level >= fs::kGraph ? gw : nw + lw);
+    const bool beside = menu_ox >= used_width + 2 * c.safe + 8 * s;
     int corner = std::clamp(opts.fps_corner, 0, 3);
     if (under_banner && !tune_mode && !beside) corner = 0, level = std::min(level, (int)fs::kFrameTime);
     const bool left = corner & 1, bottom = corner >= 2;
@@ -5025,9 +5105,13 @@ void draw_fps(ui::Ctx& c, bool under_banner) {
     const bool hw_lines = footer && opts.fps_dev_show[fs::kDevLines];
     const int foot = (footer ? 1 : 0) + (hw_lines ? 3 : 0);
     if (foot) h += 6 * s + foot * lh;
+    const float memory_h = memory_graph ? memory_graph_height(s) : 0.0f;
+    const float memory_gap = memory_graph ? 8 * s : 0.0f;
+    h += memory_h + memory_gap;
     const float edge = left ? c.safe : c.w - c.safe;
     const float clock_pad = (!bottom && !left && !under_banner && opts.show_clock > 0) ? 24 * s : 0.0f;
     const float top = bottom ? c.h - c.safe - h : under_banner && !tune_mode && page != 5 && !beside ? banner_h(c) + 10 * s : c.safe + clock_pad;
+    const float memory_y = top + h - (foot ? 6 * s + foot * lh : 0.0f) - memory_h;
     // (x for a width at the column's edge)
     const auto at = [&](float w) { return left ? edge : edge - w; };
     // (the number's colour: at FPS the classic green whatever the rate, the counter as it always was (#1957); from Frame time on
@@ -5095,7 +5179,10 @@ void draw_fps(ui::Ctx& c, bool under_banner) {
         float fy = top + h - foot * lh;
         for (int i = 0; i < foot; i++) lab.draw(c.d, at(lab.width(fit[i].c_str())), fy + 1 * s, soft, fit[i].c_str(), s), fy += lh;
     }
-    if (level < fs::kGraph) return;
+    if (level < fs::kGraph) {
+        if (memory_graph) draw_memory_graph(c, at(gw), memory_y, gw, s);
+        return;
+    }
     // (the graph)
     constexpr int kCols = 64;   // (wider columns, the lanes' parts readable)
     static fs::Frame col[kCols];
@@ -5234,7 +5321,10 @@ void draw_fps(ui::Ctx& c, bool under_banner) {
         }
     }
     c.d->PopClipRect();
-    if (!parts) return;
+    if (!parts) {
+        if (memory_graph) draw_memory_graph(c, at(gw), memory_y, gw, s);
+        return;
+    }
     // (longshot) the render thread's lane: its frame in ms on the frame graph's scale (its own height), the work and the waits
     // stacked and idle left empty, so a column's height is what the render thread spent of the frame; the cap's line and the
     // top's value beside it, as the frame graph's
@@ -5327,7 +5417,10 @@ void draw_fps(ui::Ctx& c, bool under_banner) {
     cell(0, 0, false, "Shaders built (4 s)", fps_built_text, strcmp(fps_built_text, "0") ? red : dim);
     cell(1, 0, false, "Draws left out (4 s)", fps_left_text, strcmp(fps_left_text, "0") ? red : dim);
     by += lh;
-    if (level < fs::kDev || !dev_shown) return;
+    if (level < fs::kDev || !dev_shown) {
+        if (memory_graph) draw_memory_graph(c, at(gw), memory_y, gw, s);
+        return;
+    }
     // (Dev: the renderer's own numbers, for debugging; those the details page leaves on)
     c.d->AddLine(ImVec2(x0, std::floor(by + 3 * s) + 0.5f), ImVec2(x1, std::floor(by + 3 * s) + 0.5f), ui::rgba(255, 255, 255, 40), std::max(1.0f, s));
     by += 6 * s;
@@ -5341,6 +5434,7 @@ void draw_fps(ui::Ctx& c, bool under_banner) {
         if (d.b >= 0) dev_cell(1, d.b);
         by += lh;
     }
+    if (memory_graph) draw_memory_graph(c, at(gw), memory_y, gw, s);
 }
 
 /// The start-up screen: the logo, the wordmark, what the start is doing, a bar, on a warm dark. A little below the middle; what
@@ -5603,6 +5697,7 @@ void menu_init() {
     if (opts.preset == kAutoPreset && !has_memory_budget) opts.budget = 0;   // (Auto: its tier's, menu_auto_for_gpu)
     menu_debug_rows(opts.descriptor_reuse, opts.sampler_cache);   // (the Debug rows that apply in play: what was loaded)
     fps_level_now.store(fps_stats::level_of(opts.show_fps), std::memory_order_relaxed);
+    fps_memory_graph_now.store(opts.show_memory_graph != 0, std::memory_order_relaxed);
     output_field_show();   // (longshot: Custom output size, the size of the player's own, as the file has it)
     // (the environment over the saved rows, for this run only: env_override, save)
     // (1 is Auto, a frame for each of the display's refreshes: with 2 as the least, and the console setting 2 at every
@@ -6818,6 +6913,7 @@ void menu_tick() {
         }
     }
     fps_level_now.store(fps_stats::level_of(opts.show_fps), std::memory_order_relaxed);   // (what vk_fps.cpp measures)
+    fps_memory_graph_now.store(opts.show_memory_graph != 0, std::memory_order_relaxed);
     if (opts.show_fps) {
         static int64_t next = 0, last_game = 0, last_shown = 0;
         const int64_t now = prof_now();
@@ -6860,9 +6956,10 @@ void draw_clock(ui::Ctx& c) {
 void menu_record(VkCommandBuffer cmd, uint32_t index, uint32_t w, uint32_t h) {
     const bool start = startup_on.load(std::memory_order_acquire);
     const bool fps = opts.show_fps && !start;   // (no game frames yet: not "0 FPS" over the start-up screen)
+    const bool memory = opts.show_memory_graph && !start;
     const bool clk = opts.show_clock > 0 && !start;
     const bool open = open_now.load(std::memory_order_relaxed);
-    if (!start && !fps && !clk && !open) {   // (nothing shows: no ImGui frame, no render pass)
+    if (!start && !fps && !memory && !clk && !open) {   // (nothing shows: no ImGui frame, no render pass)
         // (but a new window size or Menu size since the last bake: one frame with nothing drawn that bakes the menu's glyphs
         // and measures its page for the new size, so the next open has no hitch whatever was resized while nothing showed)
         if (prebake_needed(w, h) && ui::begin(w, h)) {
@@ -6887,7 +6984,7 @@ void menu_record(VkCommandBuffer cmd, uint32_t index, uint32_t w, uint32_t h) {
     if (start) draw_startup(c);   // (under the menu)
     if (open) draw_menu(c);
     if (clk && !open) draw_clock(c);
-    if (fps) draw_fps(c, open);
+    if (fps || memory) draw_fps(c, open);
     ::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);   // (Dear ImGui records into cmd directly, its backend through its own pointers: what this thread recorded through vk_work.h reaches cmd first)
     ui::record(cmd, index, w, h);
 }
@@ -6896,13 +6993,14 @@ void menu_record_image(VkCommandBuffer cmd, VkImage image, VkImageView view, uin
     const bool open = open_now.load(std::memory_order_relaxed);
     const bool start = startup_on.load(std::memory_order_acquire);
     const bool fps = opts.show_fps && !start;
+    const bool memory = opts.show_memory_graph && !start;
     const bool clk = opts.show_clock > 0 && !start;
-    if (!open && !fps && !clk) return;
+    if (!open && !fps && !memory && !clk) return;
     if (!ui::begin(w, h)) return;
     ui::Ctx c = ui_ctx(w, h);
     if (open) draw_menu(c);
     if (clk && !open) draw_clock(c);
-    if (fps) draw_fps(c, open);
+    if (fps || memory) draw_fps(c, open);
     ::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);   // (Dear ImGui records into cmd directly, its backend through its own pointers: what this thread recorded through vk_work.h reaches cmd first)
     ui::record_to(cmd, image, view, w, h);
 }

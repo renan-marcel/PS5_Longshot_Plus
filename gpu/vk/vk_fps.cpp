@@ -18,6 +18,7 @@
 namespace mkwvk {
 
 std::atomic<int> fps_level_now{0};
+std::atomic<bool> fps_memory_graph_now{false};
 int64_t gpu_time_ns();     // (vk_replay.cpp: the GPU's time in the timed recordings so far)
 int64_t slot_wait_ns();    // (and the replay's waits for a recording slot: inside the renderer's entries, on this thread)
 
@@ -41,6 +42,8 @@ thread_local bool on_render_thread = false;
 
 std::mutex ring_mu;
 fs::Ring<fs::kRing> ring;
+std::mutex memory_mu;
+memory_graph_stats::Ring memory_ring;
 
 }   // namespace
 
@@ -77,6 +80,31 @@ FpsRender::~FpsRender() {
 
 void fps_presented() {
     const int level = fps_level_now.load(std::memory_order_relaxed);
+    static int64_t next_memory_sample = 0;
+    static unsigned presents_until_memory_sample = 0;
+    static bool was_memory_enabled = false;
+    if (!fps_memory_graph_now.load(std::memory_order_relaxed)) {
+        if (was_memory_enabled) {
+            std::lock_guard lk(memory_mu);
+            memory_ring.clear();
+        }
+        was_memory_enabled = false;
+        next_memory_sample = 0, presents_until_memory_sample = 0;
+    } else {
+        was_memory_enabled = true;
+        if (++presents_until_memory_sample >= 8) {
+            presents_until_memory_sample = 0;
+            const int64_t sample_at = fps_clock();
+            if (!next_memory_sample || sample_at >= next_memory_sample) {
+                uint64_t used = 0, total = 0;
+                if (host && host->memory_usage && host->memory_usage(&used, &total) && total) {
+                    std::lock_guard lk(memory_mu);
+                    memory_ring.push(sample_at, used, total);
+                }
+                next_memory_sample = sample_at + memory_graph_stats::kSampleNs;
+            }
+        }
+    }
     // (the last frame's state, for the next one: on the presenting thread only)
     static int64_t last_at = 0, last_render = 0, last_wait[fs::kParts] = {}, last_slept[2] = {}, last_gpu = 0, last_pipes = 0,
                    last_left = 0, last_slot = 0;
@@ -160,6 +188,11 @@ float fps_graph(int64_t now, int count, fs::Frame* frames, bool* marks, double* 
         slowest = std::max(slowest, frames[c].ms);
     }
     return slowest;
+}
+
+memory_graph_stats::Summary fps_memory_graph(int64_t now, memory_graph_stats::Sample* samples, int max_samples) {
+    std::lock_guard lk(memory_mu);
+    return memory_ring.copy(now, samples, max_samples);
 }
 
 } // namespace mkwvk

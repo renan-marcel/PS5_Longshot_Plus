@@ -9,11 +9,13 @@
 #include <cstdint>
 
 #include "fps_stats.h"
+#include "memory_stats.h"
 
 namespace mkwvk {
 
 /// What the counter shows (fps_stats::Level): set by the menu, read at every present
 extern std::atomic<int> fps_level_now;
+extern std::atomic<bool> fps_memory_graph_now;
 inline bool fps_breakdown_on() { return fps_level_now.load(std::memory_order_relaxed) >= fps_stats::kBreakdown; }
 
 int64_t fps_clock();   // (ns, the clock the frames are stamped with)
@@ -64,5 +66,7 @@ fps_stats::Summary fps_summary(int64_t now, int64_t window, int64_t low_window);
 /// count columns: per column its slowest frame (copied into frames[c], ms 0 for none) and whether it built pipelines or left
 /// draws out; returns the slowest frame time shown
 float fps_graph(int64_t now, int count, fps_stats::Frame* frames, bool* marks, double* scroll = nullptr);
+/// The game's memory samples and the min/max used memory in the last memory_graph_stats::kWindowNs, copied newest window in order.
+memory_graph_stats::Summary fps_memory_graph(int64_t now, memory_graph_stats::Sample* samples, int max_samples);
 
 } // namespace mkwvk

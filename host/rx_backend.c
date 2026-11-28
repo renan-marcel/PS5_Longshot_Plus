@@ -68,6 +68,12 @@ void hos_mark_written(const void *p, size_t n);
 #endif
 
 static void host_log(const char *line) { hos_log("%s", line); }
+static int host_memory_usage(uint64_t *used, uint64_t *total) {
+    if (!used || !total || !hos_total_memory) return 0;
+    *total = hos_total_memory;
+    *used = hos_used_memory(hos_program_size);
+    return 1;
+}
 #if defined(A64_WRITE_TRACK) && !defined(__EMSCRIPTEN__)
 int hos_gpu_guest_ranges(uint64_t (*out)[2], int max);
 /* The soft write watch's marks (rt/a64.h A64_MARK, hos_mark_written) over the GPU-visible ranges, read and cleared:
@@ -288,7 +294,7 @@ static const MkwVkHost vk_host = {
     host_romfs_dir, host_wide_menus, host_slept_ns, host_fps_timing, hos_prompts_live_parts, host_screen_size,
     host_take_text, hos_options_file,
     hos_audio_output_count, hos_audio_output_info, hos_audio_output_select, hos_audio_output_state,
-    vk_amiibo_status, vk_amiibo_select, vk_amiibo_touch, vk_amiibo_config,
+    vk_amiibo_status, vk_amiibo_select, vk_amiibo_touch, vk_amiibo_config, host_memory_usage,
 };
 
 static const MkwVkRenderer *vk;   /* the Vulkan back end, when it was chosen and started */

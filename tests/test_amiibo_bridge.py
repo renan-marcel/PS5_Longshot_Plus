@@ -1,4 +1,4 @@
-"""The host <-> menu bridge: MkwVkHost 25's four amiibo calls, in the struct's end, set by rx_backend.c's vk_host (source check)."""
+"""The host <-> menu bridge: MkwVkHost 27's amiibo and memory calls at the end, set by rx_backend.c's vk_host (source check)."""
 import re
 import sys
 from pathlib import Path
@@ -20,12 +20,12 @@ def need(ok, msg):
         raise SystemExit("FAIL: " + msg)
 
 
-need(re.search(r"#define MKWVK_API_VERSION 26\b", api), "MKWVK_API_VERSION is not 26")
+need(re.search(r"#define MKWVK_API_VERSION 27\b", api), "MKWVK_API_VERSION is not 27")
 struct = code(between(api, "typedef struct MkwVkHost {", "} MkwVkHost;"))
 fields = [re.search(r"\(\*(\w+)\)", d).group(1) for d in struct.split(";") if "(*" in d]
-need(fields[-4:] == ["amiibo_status", "amiibo_select", "amiibo_touch", "amiibo_config"],
-     "the four amiibo calls are not MkwVkHost's last, in order: %s" % fields[-4:])
-need(fields[-5] == "audio_output_state", "the amiibo calls do not follow audio_output_state")
+need(fields[-5:-1] == ["amiibo_status", "amiibo_select", "amiibo_touch", "amiibo_config"] and fields[-1] == "memory_usage",
+     "the amiibo calls and memory callback are not MkwVkHost's last, in order: %s" % fields[-5:])
+need(fields[-6] == "audio_output_state", "the new callbacks do not follow audio_output_state")
 need(re.search(r"int \(\*amiibo_status\)\(void\);", struct), "amiibo_status signature")
 need(re.search(r"void \(\*amiibo_select\)\(const uint8_t \*id, const char \*name\);", struct), "amiibo_select signature")
 need(re.search(r"void \(\*amiibo_touch\)\(int on\);", struct), "amiibo_touch signature")
@@ -33,8 +33,8 @@ need(re.search(r"void \(\*amiibo_config\)\(int emulation, int random_uid, int au
 
 table = [v.strip() for v in code(between(backend, "static const MkwVkHost vk_host = {", "};")).split(",") if v.strip()]
 need(len(table) == len(fields) + 1, "vk_host's initializer and MkwVkHost differ in length")   # (+1: the version)
-need(table[-4:] == ["vk_amiibo_status", "vk_amiibo_select", "vk_amiibo_touch", "vk_amiibo_config"],
-     "vk_host does not set the four amiibo calls last, in order")
+need(table[-5:] == ["vk_amiibo_status", "vk_amiibo_select", "vk_amiibo_touch", "vk_amiibo_config", "host_memory_usage"],
+     "vk_host does not set the amiibo calls and memory callback last, in order")
 
 sel = block(backend, "static void vk_amiibo_select(")
 need("amiibo_select(NULL)" in sel and "amiibo_select(&f)" in sel, "vk_amiibo_select: NULL id / figure calls")
