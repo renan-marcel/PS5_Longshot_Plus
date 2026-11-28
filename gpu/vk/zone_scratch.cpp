@@ -38,6 +38,7 @@ ArenaNode* g_registry_head = nullptr;
 
 std::atomic<uint64_t> g_decommit_epoch{0};
 std::atomic<uint64_t> g_gpu_safe_val{0};
+std::atomic<bool> g_init_failed{false};
 
 struct ThreadScratch {
     mem_arena::ScratchArena arena;
@@ -65,6 +66,7 @@ struct ThreadScratch {
 
         if (!arena.init(kThreadArenaReserveBytes, kThreadArenaChunkBytes)) {
             init_failed = true;
+            g_init_failed.store(true, std::memory_order_relaxed);
             static std::atomic<int> logged{0};
             if (logged.fetch_add(1, std::memory_order_relaxed) < 8) {
                 logf("vk: zone_scratch: ScratchArena::init(%zu) failed; falling back to heap",
@@ -190,6 +192,10 @@ std::size_t zone_scratch_peak_bytes() noexcept {
     return best;
 }
 
+bool zone_scratch_error() noexcept {
+    return g_init_failed.load(std::memory_order_relaxed);
+}
+
 #else
 
 ZoneScratchScope::ZoneScratchScope() noexcept = default;
@@ -200,6 +206,7 @@ void zone_scratch_quiescent(uint64_t) noexcept {}
 std::size_t zone_scratch_committed_bytes() noexcept { return 0; }
 std::size_t zone_scratch_reserved_bytes() noexcept { return 0; }
 std::size_t zone_scratch_peak_bytes() noexcept { return 0; }
+bool zone_scratch_error() noexcept { return false; }
 
 #endif
 

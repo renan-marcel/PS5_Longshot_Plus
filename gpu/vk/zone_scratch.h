@@ -24,6 +24,7 @@ void zone_scratch_quiescent(uint64_t completed_val) noexcept;
 std::size_t zone_scratch_committed_bytes() noexcept;
 std::size_t zone_scratch_reserved_bytes() noexcept;
 std::size_t zone_scratch_peak_bytes() noexcept;
+bool zone_scratch_error() noexcept;
 
 /// RAII scope over the calling thread's ScratchArena when LONGSHOT_ZONE_SCRATCH_ARENA=1.
 /// When disabled (0), this is a zero-cost no-op and alloc_array() returns nullptr silently.
