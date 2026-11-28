@@ -528,13 +528,17 @@ extern "C" void rx_vk_memory_stats(char* out, size_t n) {
         vmaGetHeapBudgets(vma, b);
         for (uint32_t h = 0; h < dev.memory.memoryHeapCount; h++) blocks += b[h].statistics.blockBytes, allocs += b[h].statistics.allocationBytes;
     }
+    uint64_t ev_tex = 0, ev_bytes = 0;
+    rx_vk_zone_evict_stats(&ev_tex, &ev_bytes);
     snprintf(out, n, "vma_block_mb=%llu vma_alloc_mb=%llu tex_n=%llu tex_mb=%llu mirror_mb=%llu "
-             "arena_committed_mb=%llu arena_reserved_mb=%llu arena_peak_mb=%llu%s",
+             "arena_committed_mb=%llu arena_reserved_mb=%llu arena_peak_mb=%llu%s "
+             "zone_evicted_tex=%llu zone_evicted_mb=%llu",
              (unsigned long long)(blocks >> 20), (unsigned long long)(allocs >> 20), (unsigned long long)texture_count(),
              (unsigned long long)(texture_bytes() >> 20), (unsigned long long)(mirror_bytes_now() >> 20),
              (unsigned long long)(zone_scratch_committed_bytes() >> 20),
              (unsigned long long)(zone_scratch_reserved_bytes() >> 20),
              (unsigned long long)(zone_scratch_peak_bytes() >> 20),
-             zone_scratch_error() ? " arena_err=1" : "");
+             zone_scratch_error() ? " arena_err=1" : "",
+             (unsigned long long)ev_tex, (unsigned long long)(ev_bytes >> 20));
 }
 #endif

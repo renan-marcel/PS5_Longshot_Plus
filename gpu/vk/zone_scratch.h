@@ -94,6 +94,20 @@ struct ScratchBuf {
         ptr = fallback.data();
     }
 
+    void assign_copy(ZoneScratchScope& scope, const T* src, std::size_t n) {
+        ptr = nullptr;
+        count = n;
+        fallback.clear();
+        if (n == 0) return;
+        if (T* p = scope.alloc_array<T>(n)) {
+            std::memcpy(p, src, n * sizeof(T));
+            ptr = p;
+            return;
+        }
+        fallback.assign(src, src + n);
+        ptr = fallback.data();
+    }
+
     T* data() noexcept { return ptr; }
     const T* data() const noexcept { return ptr; }
     std::size_t size() const noexcept { return count; }

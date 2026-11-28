@@ -78,6 +78,39 @@ static pthread_mutex_t window_lock = PTHREAD_MUTEX_INITIALIZER;
 static int64_t block_next, block_end;         /* direct memory of the current block not mapped yet */
 static uint64_t committed_bytes;
 static uint64_t reused_bytes, decommitted_bytes;   /* (window_lock: commits taken from free_units, and all given back to it) */
+static size_t g_free_units_bytes;
+static uint64_t g_released_dm_bytes;
+static uint64_t g_trim_runs;
+
+static int free_units_keep_mb(void) {
+    static int cached = -2;
+    if (cached == -2) {
+        const char *e = getenv("LONGSHOT_FREE_UNITS_KEEP_MB");
+        if (e && *e) {
+            char *end = NULL;
+            long v = strtol(e, &end, 10);
+            cached = (end != e && v >= 0) ? (int)v : -1;
+        } else {
+            cached = -1;
+        }
+    }
+    return cached;
+}
+
+static size_t free_units_min_run_units(void) {
+    static size_t cached = 0;
+    if (!cached) {
+        const char *e = getenv("LONGSHOT_FREE_UNITS_MIN_RUN_MB");
+        long mb = 2;
+        if (e && *e) {
+            char *end = NULL;
+            long v = strtol(e, &end, 10);
+            if (end != e && v >= 0) mb = v;
+        }
+        cached = mb > 0 ? ((size_t)mb << 20) / UNIT : 1;
+    }
+    return cached;
+}
 
 static int in_window(uintptr_t lo, uintptr_t hi) { return lo >= HOS_PS5_GUEST_LO && hi <= HOS_PS5_GUEST_HI && lo < hi; }
 
@@ -170,6 +203,7 @@ static int commit_units(uintptr_t lo, uintptr_t hi) {
                 uint64_t k = 1;
                 while (k < need / UNIT && k < free_count && free_units[free_count - 1 - k] == free_units[free_count - k] - (int64_t)UNIT) k++;
                 free_count -= k;
+                __atomic_store_n(&g_free_units_bytes, free_count * UNIT, __ATOMIC_RELAXED);
                 phys = free_units[free_count], got = k * UNIT;
                 __atomic_add_fetch(&reused_bytes, got, __ATOMIC_RELAXED);   /* (logs/memory.txt's "pool" line) */
             } else phys = direct_take(need, &got);
@@ -271,14 +305,137 @@ int hos_ps5_decommit(void *addr, size_t size) {
             continue;   /* (their memory is lost to the game; the units read as reserved and are backed afresh if touched) */
         }
         for (uint64_t k = 0; k < n; k++) free_units[free_count++] = unit_phys[u + k];
+        __atomic_store_n(&g_free_units_bytes, free_count * UNIT, __ATOMIC_RELAXED);
         committed_bytes -= n * UNIT;
         __atomic_add_fetch(&decommitted_bytes, n * UNIT, __ATOMIC_RELAXED);
         units += n;
         at += n * UNIT;
     }
+    const size_t retained = free_count * UNIT;
     pthread_mutex_unlock(&window_lock);
     if (now_ms() - t0 >= 20) hos_ps5_klog_now("[ps5] guest decommit: %llu MiB given back in %.0f ms", (unsigned long long)(units * UNIT >> 20), now_ms() - t0);
+    const int keep_mb = free_units_keep_mb();
+    if (keep_mb >= 0) {
+        const size_t keep_bytes = (size_t)keep_mb << 20;
+        if (retained > keep_bytes + (16ULL << 20))
+            hos_ps5_trim_free_units(keep_bytes);
+    }
     return 1;
+}
+
+typedef struct {
+    int64_t addr;
+    size_t units;
+    int release;
+} DmRun;
+
+static int cmp_i64_asc(const void *a, const void *b) {
+    const int64_t x = *(const int64_t *)a, y = *(const int64_t *)b;
+    return (x > y) - (x < y);
+}
+
+static int cmp_run_desc(const void *a, const void *b) {
+    const DmRun *x = (const DmRun *)a, *y = (const DmRun *)b;
+    if (x->units != y->units) return x->units > y->units ? -1 : 1;
+    return (x->addr > y->addr) - (x->addr < y->addr);
+}
+
+size_t hos_ps5_trim_free_units(size_t keep_bytes) {
+    const int keep_mb = free_units_keep_mb();
+    if (keep_mb < 0) return 0;
+    if (keep_bytes == (size_t)-1) keep_bytes = (size_t)keep_mb << 20;
+    /* Emergency drain (keep_bytes == 0) must also release <2 MiB runs so small fragments do not stay trapped. */
+    const size_t min_run = (keep_bytes == 0) ? 1 : free_units_min_run_units();
+
+    pthread_mutex_lock(&window_lock);
+    const size_t retained_bytes = free_count * UNIT;
+    if (retained_bytes <= keep_bytes || !free_count) {
+        pthread_mutex_unlock(&window_lock);
+        return 0;
+    }
+
+    qsort(free_units, free_count, sizeof *free_units, cmp_i64_asc);
+
+    DmRun *runs = malloc(free_count * sizeof *runs);
+    if (!runs) {
+        pthread_mutex_unlock(&window_lock);
+        return 0;
+    }
+    size_t nruns = 0;
+    for (size_t i = 0; i < free_count; ) {
+        size_t len = 1;
+        while (i + len < free_count && free_units[i + len] == free_units[i + len - 1] + (int64_t)UNIT) len++;
+        runs[nruns++] = (DmRun){free_units[i], len, 0};
+        i += len;
+    }
+
+    /* Prioritize releasing largest contiguous runs >= min_run first until retained <= keep_bytes */
+    qsort(runs, nruns, sizeof *runs, cmp_run_desc);
+    size_t keep_units = keep_bytes / UNIT;
+    size_t cur_units = free_count;
+    size_t n_rel = 0;
+    for (size_t r = 0; r < nruns && cur_units > keep_units; r++) {
+        if (runs[r].units < min_run) break;
+        runs[r].release = 1;
+        cur_units -= runs[r].units;
+        n_rel++;
+    }
+
+    /* Repack remaining runs: largest runs at index 0, smallest 64 KiB fragments at LIFO tail */
+    size_t out_count = 0;
+    for (size_t r = 0; r < nruns; r++) {
+        if (runs[r].release) continue;
+        for (size_t k = 0; k < runs[r].units; k++) {
+            free_units[out_count++] = runs[r].addr + (int64_t)(k * UNIT);
+        }
+    }
+    free_count = out_count;
+    __atomic_store_n(&g_free_units_bytes, free_count * UNIT, __ATOMIC_RELAXED);
+    pthread_mutex_unlock(&window_lock);
+
+    if (!n_rel) {
+        free(runs);
+        return 0;
+    }
+
+    size_t released_now = 0;
+    for (size_t r = 0; r < nruns; r++) {
+        if (!runs[r].release) continue;
+        const size_t len = runs[r].units * UNIT;
+        const int rc = sceKernelReleaseDirectMemory(runs[r].addr, len);
+        if (rc != 0) {
+            static int logged_fail;
+            if (!__atomic_exchange_n(&logged_fail, 1, __ATOMIC_RELAXED))
+                hos_ps5_klog_now("[PS5_TRIM] sceKernelReleaseDirectMemory failed rc=0x%x", (unsigned)rc);
+            pthread_mutex_lock(&window_lock);
+            for (size_t j = r; j < nruns; j++) {
+                if (!runs[j].release) continue;
+                const size_t u = runs[j].units;
+                if (free_count + u > free_cap) {
+                    size_t cap = free_cap ? free_cap * 2 : 65536;
+                    while (cap < free_count + u) cap *= 2;
+                    int64_t *grown = realloc(free_units, cap * sizeof *grown);
+                    if (grown) { free_units = grown; free_cap = cap; }
+                }
+                if (free_count + u <= free_cap) {
+                    for (size_t k = 0; k < u; k++) free_units[free_count++] = runs[j].addr + (int64_t)(k * UNIT);
+                }
+            }
+            __atomic_store_n(&g_free_units_bytes, free_count * UNIT, __ATOMIC_RELAXED);
+            pthread_mutex_unlock(&window_lock);
+            break;
+        }
+        __atomic_add_fetch(&g_released_dm_bytes, (uint64_t)len, __ATOMIC_RELAXED);
+        __atomic_add_fetch(&g_trim_runs, 1, __ATOMIC_RELAXED);
+        released_now += len;
+    }
+    free(runs);
+    return released_now;
+}
+
+void hos_ps5_free_units_stats(size_t *out_retained_bytes, uint64_t *out_released_bytes) {
+    if (out_retained_bytes) *out_retained_bytes = __atomic_load_n(&g_free_units_bytes, __ATOMIC_RELAXED);
+    if (out_released_bytes) *out_released_bytes = __atomic_load_n(&g_released_dm_bytes, __ATOMIC_RELAXED);
 }
 
 static int prot_bits(DWORD protect) {
@@ -1338,8 +1495,14 @@ static void mem_write(const char *why, uint64_t room, uint64_t started_ms) {
         hos_vi_pace(&frames, &slow, &worst);
         const uint64_t reused = __atomic_load_n(&reused_bytes, __ATOMIC_RELAXED),   /* (no wait for window_lock: a floor exit's) */
                        given = __atomic_load_n(&decommitted_bytes, __ATOMIC_RELAXED);
-        snprintf(line, sizeof line, "pool reused_mb=%llu decommitted_mb=%llu frames=%lld slow_frames=%lld worst_ms=%.1f",
-                 (unsigned long long)(reused >> 20), (unsigned long long)(given >> 20), (long long)frames, (long long)slow, worst);
+        size_t retained_dm = 0;
+        uint64_t released_dm = 0;
+        hos_ps5_free_units_stats(&retained_dm, &released_dm);
+        const uint64_t trim_runs = __atomic_load_n(&g_trim_runs, __ATOMIC_RELAXED);
+        snprintf(line, sizeof line, "pool reused_mb=%llu decommitted_mb=%llu free_units_mb=%zu released_dm_mb=%llu trim_runs=%llu frames=%lld slow_frames=%lld worst_ms=%.1f",
+                 (unsigned long long)(reused >> 20), (unsigned long long)(given >> 20),
+                 retained_dm >> 20, (unsigned long long)(released_dm >> 20), (unsigned long long)trim_runs,
+                 (long long)frames, (long long)slow, worst);
         hos_ps5_logfile("memory.txt", line);
         int hos_oot_heap_line(char *out, size_t cap), hos_oot_heap_top(char *out, size_t cap, int k);   /* (host/oot_heap_give_back.c) */
         if (hos_oot_heap_line(line, sizeof line) > 0) hos_ps5_logfile("memory.txt", line);
@@ -1366,7 +1529,13 @@ static void *memory_floor_watch(void *unused) {
     const uint64_t started_ms = zone_now_ms();
     for (;;) {
         uint64_t pieces = 0;
-        const uint64_t room = direct_room_now(&pieces);
+        uint64_t room = direct_room_now(&pieces);
+        if (free_units_keep_mb() >= 0 && (room >> 20) < 900) {
+            size_t retained = 0;
+            hos_ps5_free_units_stats(&retained, NULL);
+            if (retained > 0 && hos_ps5_trim_free_units(0) > 0)
+                room = direct_room_now(&pieces);
+        }
         {   /* (logs/memory.txt, on its schedule) */
             const char *why = mem_sched_due(&sched, zone_now_ms(), __atomic_exchange_n(&mem_zone_changed, 0, __ATOMIC_ACQ_REL));
             if (why) mem_write(why, room, started_ms);

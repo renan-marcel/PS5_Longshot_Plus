@@ -52,6 +52,10 @@ int hos_ps5_dlclose(void *module);
 
 /* The process ends through the shell (sceSystemServiceLoadExec "exit"): _exit is a crash report on the console */
 __attribute__((noreturn)) void hos_ps5_exit(int code);
+
+/* Release excess decommitted direct memory units back to the console when LONGSHOT_FREE_UNITS_KEEP_MB >= 0 */
+size_t hos_ps5_trim_free_units(size_t keep_bytes);
+void hos_ps5_free_units_stats(size_t *out_retained_bytes, uint64_t *out_released_bytes);
 #ifdef __cplusplus
 }
 #endif

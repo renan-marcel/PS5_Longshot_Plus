@@ -18,6 +18,7 @@
 #include <vector>
 #include <condition_variable>
 #include "vk_menu.h"
+#include "zone_scratch.h"
 #include <deque>
 #include <unordered_map>
 #include <unordered_set>
@@ -1439,33 +1440,45 @@ bool overlay_off() {
 }
 std::atomic<int64_t> st_overlaid{0}, st_differed{0};   // (pages read from the shadow; of them, ones guest memory had changed)
 
-const uint8_t* memory_as_submitted(uint64_t guest, const uint8_t* live, uint64_t n, std::vector<uint8_t>& scratch) {
+template<typename CopyFn>
+static const uint8_t* memory_as_submitted_impl(uint64_t guest, const uint8_t* live, uint64_t n, CopyFn&& copy_live) {
     if (!n || !shadow_n.load(std::memory_order_relaxed) || overlay_off()) return live;
     std::lock_guard lk(shadow_mu);
-    bool any = false;
+    uint8_t* dst = nullptr;
     for (uint64_t r = guest >> 21; r <= (guest + n - 1) >> 21; r++) {
         if (!shadow_regions.count((uint32_t)r)) continue;
         const uint64_t p0 = std::max(guest >> 12, r << 9), p1 = std::min((guest + n + 4095) >> 12, (r + 1) << 9);
         for (uint64_t p = p0; p < p1; p++) {
             auto it = shadow.find((uint32_t)p);
             if (it == shadow.end()) continue;
-            if (!any) {
-                any = true;
-                if (scratch.data() != live) scratch.assign(live, live + n);
-            }
+            if (!dst) dst = copy_live();
             const uint64_t a = std::max(p << 12, guest), b = std::min((p + 1) << 12, guest + n);
             st_overlaid++;
-            if (std::memcmp(scratch.data() + (a - guest), it->second.b.get() + (a - (p << 12)), b - a)) st_differed++;
-            std::memcpy(scratch.data() + (a - guest), it->second.b.get() + (a - (p << 12)), b - a);
+            if (std::memcmp(dst + (a - guest), it->second.b.get() + (a - (p << 12)), b - a)) st_differed++;
+            std::memcpy(dst + (a - guest), it->second.b.get() + (a - (p << 12)), b - a);
         }
     }
     static std::atomic<int64_t> served{0};
-    if (any && served.fetch_add(1) % 2000 == 0)
+    if (dst && served.fetch_add(1) % 2000 == 0)
         logf("vk: texture storage read as submitted (%lld times; %lld pages from the copies, %lld of them rewritten in "
              "guest memory since their submit; %zu pages kept, %zu spans, %llu MB)", (long long)served.load(),
              (long long)st_overlaid.load(), (long long)st_differed.load(), shadow.size(), tex_spans.size(),
              (unsigned long long)(tex_merged_bytes >> 20));
-    return any ? scratch.data() : live;
+    return dst ? dst : live;
+}
+
+const uint8_t* memory_as_submitted(uint64_t guest, const uint8_t* live, uint64_t n, std::vector<uint8_t>& scratch) {
+    return memory_as_submitted_impl(guest, live, n, [&]() -> uint8_t* {
+        if (scratch.data() != live) scratch.assign(live, live + n);
+        return scratch.data();
+    });
+}
+
+const uint8_t* memory_as_submitted(uint64_t guest, const uint8_t* live, uint64_t n, ZoneScratchScope& scope, ScratchBuf<uint8_t>& scratch) {
+    return memory_as_submitted_impl(guest, live, n, [&]() -> uint8_t* {
+        if (scratch.data() != live) scratch.assign_copy(scope, live, n);
+        return scratch.data();
+    });
 }
 
 void memory_drop_shadow(uint64_t guest, uint64_t size) {
