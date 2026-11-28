@@ -1117,6 +1117,34 @@ const uint8_t* guest_bytes(uint64_t gpu, uint64_t n, std::vector<uint8_t>& scrat
     return scratch.data();
 }
 
+/// Same as guest_bytes, backed by ZoneScratchScope to avoid large contiguous heap allocations on PS5.
+const uint8_t* guest_bytes_scratch(uint64_t gpu, uint64_t n, ZoneScratchScope& scope, ScratchBuf<uint8_t>& scratch) {
+    uint64_t avail = 0;
+    const uint8_t* p = host->gpu_ptr(gpu, &avail);
+    if (p && avail >= n) return gpu < (1ull << 40) ? memory_as_submitted(gpu, p, n, scope, scratch) : p;
+    if (n >= (32u << 20)) {
+        scratch.resize(scope, n);
+        const uint32_t nt = std::clamp(std::thread::hardware_concurrency() / 2, 1u, 6u);
+        const uint64_t per = ((n + nt - 1) / nt + 0xFFFF) & ~0xFFFFull;
+        std::vector<std::thread> pool;
+        auto part = [&](uint32_t t) {
+            const uint64_t a = (uint64_t)t * per, b = std::min(n, a + per);
+            for (uint64_t at = a; at < b; at += 0x10000)
+                if (!host->gpu_read(gpu + at, scratch.data() + at, std::min<uint64_t>(0x10000, b - at)))
+                    std::memset(scratch.data() + at, 0, std::min<uint64_t>(0x10000, b - at));
+        };
+        for (uint32_t t = 1; t < nt; t++) pool.emplace_back([&part, t] { helper_thread_start(), part(t); });
+        part(0);
+        for (std::thread& t : pool) t.join();
+        return scratch.data();
+    }
+    scratch.assign_zero(scope, n);
+    if (!host->gpu_read(gpu, scratch.data(), n)) {
+        for (uint64_t at = 0; at < n; at += 0x10000) host->gpu_read(gpu + at, scratch.data() + at, std::min<uint64_t>(0x10000, n - at));
+    }
+    return scratch.data();
+}
+
 void widen_rows(uint8_t* dst, const uint8_t* src, size_t texels, int from, int to) {
     const int comp = from / 3;
     for (size_t i = 0; i < texels; i++) {
@@ -1176,12 +1204,13 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
         astc_fail = "no staging memory for its ASTC blocks";
         return false;
     }
-    std::vector<uint8_t> scratch;
+    ZoneScratchScope astc_scope;
+    ScratchBuf<uint8_t> scratch;
     for (size_t k = 0; k < layers.size(); k++) {
         const uint64_t at = (uint64_t)layers[k] * layer_size + tail0;
         if (at >= total) continue;
         const uint64_t n = std::min(tail, total - at);
-        std::memcpy(s.data + k * tail, guest_bytes(tex.gpu + at, n, scratch), n);
+        std::memcpy(s.data + k * tail, guest_bytes_scratch(tex.gpu + at, n, astc_scope, scratch), n);
     }
     const uint64_t staged = tail * layers.size();
     flush_mapped_range(s.allocation, s.offset, staged);   // (encoded blocks read by the GPU decoder, not necessarily coherent)
@@ -1719,7 +1748,6 @@ bool upload_inner(Texture& tex, const Ranges* dirty) {
     const uint32_t copy_layers = tex.type == VK_IMAGE_TYPE_3D ? 1 : tex.layers;
     const VkImageAspectFlags aspect = tex.aspect;
     std::vector<VkBufferImageCopy> copies;
-    std::vector<uint8_t> scratch;
     VkBuffer buffer = VK_NULL_HANDLE;
     for (uint32_t level = 0; level < tex.levels; level++) {
         const LevelGeo g = level_geo(tex, level);
@@ -1757,7 +1785,7 @@ bool upload_inner(Texture& tex, const Ranges* dirty) {
             }
             for (const auto& [row0, nrow] : runs) {
                 ZoneScratchScope run_scope;
-                ScratchBuf<uint8_t> lin, pad_buf;
+                ScratchBuf<uint8_t> lin, pad_buf, scratch;
                 const uint32_t y0 = row0 * rows_per;                       // (blocks)
                 const uint32_t th = std::min(g.th - y0, nrow * rows_per);   // (blocks)
                 const uint64_t block_bytes = (uint64_t)g.tw * th * g.td * src_bpb;
@@ -1777,7 +1805,7 @@ bool upload_inner(Texture& tex, const Ranges* dirty) {
                 uint8_t* blocks = (tex.astc || widen_from) ? (lin.resize(run_scope, block_bytes), lin.data()) : out;
                 if (linear) {
                     const uint64_t row = (uint64_t)g.tw * src_bpb;
-                    const uint8_t* src = guest_bytes(tex.gpu + src_off, (uint64_t)stride * (g.th - 1) + row, scratch);
+                    const uint8_t* src = guest_bytes_scratch(tex.gpu + src_off, (uint64_t)stride * (g.th - 1) + row, run_scope, scratch);
                     for (uint32_t y = 0; y < g.th; y++) std::memcpy(blocks + y * row, src + (uint64_t)y * stride, row);
                 } else {
                     // (suyu's unswizzle reads the whole swizzled span without bounds checks: a span the storage
@@ -1796,7 +1824,7 @@ bool upload_inner(Texture& tex, const Ranges* dirty) {
                     const uint8_t* src = nullptr;
                     if (gather_parts) {
                     } else if (from < total && total - from >= need) {
-                        src = guest_bytes(tex.gpu + from, need, scratch);
+                        src = guest_bytes_scratch(tex.gpu + from, need, run_scope, scratch);
                     } else {
                         pad_buf.assign_zero(run_scope, need);
                         if (from < total) host->gpu_read(tex.gpu + from, pad_buf.data(), total - from);

@@ -344,7 +344,8 @@ size_t hos_ps5_trim_free_units(size_t keep_bytes) {
     const int keep_mb = free_units_keep_mb();
     if (keep_mb < 0) return 0;
     if (keep_bytes == (size_t)-1) keep_bytes = (size_t)keep_mb << 20;
-    const size_t min_run = free_units_min_run_units();
+    /* Emergency drain (keep_bytes == 0) must also release <2 MiB runs so small fragments do not stay trapped. */
+    const size_t min_run = (keep_bytes == 0) ? 1 : free_units_min_run_units();
 
     pthread_mutex_lock(&window_lock);
     const size_t retained_bytes = free_count * UNIT;
