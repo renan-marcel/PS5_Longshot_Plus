@@ -28,6 +28,7 @@
 #include <map>
 #include <unordered_map>
 #include <unordered_set>
+#include "zone_scratch.h"
 
 #include "vk_temporal.h"
 #include "vk_fsr3_inputs.h"   // (the camera jitter while AMD FSR 3.1 upscales)
@@ -2083,6 +2084,7 @@ void par_worker_main() {
             par_pool.jobs.pop_front();
         }
         fn();
+        zone_scratch_quiescent(completed());
         std::lock_guard lk(par_pool.mu);
         if (--par_pool.pending == 0) par_pool.done.notify_all();
     }
@@ -4805,6 +4807,7 @@ void do_present(const nvn_tex* t, const int crop[4]) {
             pending = {true, value, presents, {}};
         }
         log_frame_stats();
+        zone_scratch_on_present(pushed.load(std::memory_order_acquire), completed());
     }
     if (dev.offscreen) frame_log_present();   // (no window: the copy into the offscreen image above is its present)
     if (dev.offscreen || interpolated) return;

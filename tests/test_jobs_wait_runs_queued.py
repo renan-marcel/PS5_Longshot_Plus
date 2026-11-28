@@ -28,6 +28,7 @@ inline int SetThreadPriority(HANDLE, int) { return 1; }
 inline long SetThreadDescription(HANDLE, const wchar_t*) { return 0; }
 namespace mkwvk {
 inline void logf(const char*, ...) {}
+inline uint64_t vk_timeline_completed() { return 0; }
 }
 """
 
@@ -35,6 +36,13 @@ STUB_DRAW = """#pragma once
 namespace mkwvk {
 inline void ub_thread_off() {}
 inline void pipeline_cache_between_builds() {}
+}
+"""
+
+STUB_ZONE_SCRATCH = """#pragma once
+#include <cstdint>
+namespace mkwvk {
+inline void zone_scratch_quiescent(uint64_t) noexcept {}
 }
 """
 
@@ -74,6 +82,7 @@ def main():
             shutil.copy(ROOT / "gpu/vk" / name, tmp / name)
         (tmp / "vk_internal.h").write_text(STUB_INTERNAL, encoding="utf-8")
         (tmp / "vk_draw.h").write_text(STUB_DRAW, encoding="utf-8")
+        (tmp / "zone_scratch.h").write_text(STUB_ZONE_SCRATCH, encoding="utf-8")
         exe = tmp / "jobs-wait"
         subprocess.run([args.cxx, "-std=c++20", "-Wall", "-Wextra", "-pthread", "-I", str(tmp),
                         "-I", str(ROOT / "gpu/vk/compat"),

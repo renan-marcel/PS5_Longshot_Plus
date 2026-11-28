@@ -1,4 +1,5 @@
 #include "zone_boost.h"
+#include "zone_scratch.h"
 // Draws and dispatches: a program's pipeline layout (its stages' descriptors in Eden's order, as the SPIR-V back end
 // numbered them, one push-descriptor set when they fit), graphics pipelines (whatever Vulkan 1.3 and
 // VK_EXT_extended_dynamic_state3 take as dynamic state is dynamic; the rest is the key), each draw's descriptors
@@ -8285,9 +8286,12 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         if (d.indirect || d.count < 4) SKIP_HERE();
         if (d.count > (1 << 24)) SKIP_HERE();   // (longshot: 4M quads at most; the game's count sized host vectors of up to 16 GB)
         const uint32_t quads = (uint32_t)d.count / 4, unit = d.itype == 0 ? 1 : d.itype == 1 ? 2 : 4;
-        std::vector<uint32_t> src(d.indexed ? (size_t)quads * 4 : 0);
+        ZoneScratchScope quad_scope;
+        ScratchBuf<uint32_t> src;
         if (d.indexed) {
-            std::vector<uint8_t> raw((size_t)quads * 4 * unit);
+            src.resize(quad_scope, (size_t)quads * 4);
+            ScratchBuf<uint8_t> raw;
+            raw.resize(quad_scope, (size_t)quads * 4 * unit);
             if (!memory_read_as_submitted(d.ibuf, raw.data(), raw.size())) SKIP_HERE();
             for (size_t i = 0; i < src.size(); i++) {
                 uint32_t v = 0;
