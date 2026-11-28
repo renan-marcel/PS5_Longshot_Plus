@@ -13,6 +13,7 @@
 #include "longshot_env.h"
 #include "vk_internal.h"
 #include "vk_draw.h"   // (ub_thread_off)
+#include "zone_scratch.h"
 
 namespace mkwvk {
 namespace {
@@ -68,6 +69,7 @@ void worker() {
             queue.pop_front();
         }
         run_guarded(fn);
+        zone_scratch_quiescent(vk_timeline_completed());
         pending--;
         jobs_notify();
     }

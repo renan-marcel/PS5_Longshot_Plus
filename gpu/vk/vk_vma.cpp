@@ -16,6 +16,7 @@
 #endif
 #include "vram_compact.h"
 #include "vk_work.h"   // (last: RX_VK_RECORDER=defer drains before the destructions and the invalidate below)
+#include "zone_scratch.h"
 
 namespace mkwvk {
 
@@ -527,8 +528,13 @@ extern "C" void rx_vk_memory_stats(char* out, size_t n) {
         vmaGetHeapBudgets(vma, b);
         for (uint32_t h = 0; h < dev.memory.memoryHeapCount; h++) blocks += b[h].statistics.blockBytes, allocs += b[h].statistics.allocationBytes;
     }
-    snprintf(out, n, "vma_block_mb=%llu vma_alloc_mb=%llu tex_n=%llu tex_mb=%llu mirror_mb=%llu", (unsigned long long)(blocks >> 20),
-             (unsigned long long)(allocs >> 20), (unsigned long long)texture_count(), (unsigned long long)(texture_bytes() >> 20),
-             (unsigned long long)(mirror_bytes_now() >> 20));
+    snprintf(out, n, "vma_block_mb=%llu vma_alloc_mb=%llu tex_n=%llu tex_mb=%llu mirror_mb=%llu "
+             "arena_committed_mb=%llu arena_reserved_mb=%llu arena_peak_mb=%llu%s",
+             (unsigned long long)(blocks >> 20), (unsigned long long)(allocs >> 20), (unsigned long long)texture_count(),
+             (unsigned long long)(texture_bytes() >> 20), (unsigned long long)(mirror_bytes_now() >> 20),
+             (unsigned long long)(zone_scratch_committed_bytes() >> 20),
+             (unsigned long long)(zone_scratch_reserved_bytes() >> 20),
+             (unsigned long long)(zone_scratch_peak_bytes() >> 20),
+             zone_scratch_error() ? " arena_err=1" : "");
 }
 #endif

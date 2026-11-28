@@ -28,6 +28,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include "zone_scratch.h"
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
@@ -500,8 +501,9 @@ void program_cache_save(const Program& p, const std::vector<std::vector<uint32_t
     if (disk_listing) disk_records[p.key].push_back({at + (int64_t)head_size, (size_t)stored, kind});
 }
 
-bool program_cache_payload(const uint8_t* stored, size_t stored_size, uint32_t kind, std::vector<uint8_t>& plain,
-                           const uint8_t** payload, size_t* payload_size) {
+template <typename ResizeFn>
+bool program_cache_payload_impl(const uint8_t* stored, size_t stored_size, uint32_t kind, ResizeFn&& resize_fn,
+                                const uint8_t** payload, size_t* payload_size) {
     *payload = stored;
     *payload_size = stored_size;
     if (!(kind & kCompressedKind)) return true;
@@ -509,12 +511,24 @@ bool program_cache_payload(const uint8_t* stored, size_t stored_size, uint32_t k
     uint64_t usize;
     std::memcpy(&usize, stored, 8);
     if (usize < 4 || usize > (1ull << 31)) return false;
-    plain.resize((size_t)usize);
-    const size_t n = ZSTD_decompress(plain.data(), plain.size(), stored + 8, stored_size - 8);
-    if (ZSTD_isError(n) || n != plain.size()) return false;
-    *payload = plain.data();
-    *payload_size = plain.size();
+    uint8_t* out = resize_fn((size_t)usize);
+    const size_t n = ZSTD_decompress(out, (size_t)usize, stored + 8, stored_size - 8);
+    if (ZSTD_isError(n) || n != (size_t)usize) return false;
+    *payload = out;
+    *payload_size = (size_t)usize;
     return true;
+}
+
+bool program_cache_payload(const uint8_t* stored, size_t stored_size, uint32_t kind, std::vector<uint8_t>& plain,
+                           const uint8_t** payload, size_t* payload_size) {
+    return program_cache_payload_impl(stored, stored_size, kind, [&](size_t n) { plain.resize(n); return plain.data(); },
+                                      payload, payload_size);
+}
+
+bool program_cache_payload(const uint8_t* stored, size_t stored_size, uint32_t kind, ZoneScratchScope& scope,
+                           ScratchBuf<uint8_t>& plain, const uint8_t** payload, size_t* payload_size) {
+    return program_cache_payload_impl(stored, stored_size, kind, [&](size_t n) { plain.resize(scope, n); return plain.data(); },
+                                      payload, payload_size);
 }
 
 /// (the compressed cache) a record read whole from in (under mu when given) and unpacked into plain: false when it does not read
@@ -555,8 +569,10 @@ void program_cache_read(FILE* in, std::mutex* mu, uint64_t key, const std::vecto
                 if (programs_in_play.load(std::memory_order_relaxed) && !use_counters.background) census.play_loads++, census.play_load_ns += ns;
             }
         } counted;
+        ZoneScratchScope rec_scope;
         const size_t head_size = disk_zstd ? kZstdHead : 16;
-        std::vector<uint8_t> data(head_size + d.size);   // (with its head: the key, size and kind are checked against the file's)
+        ScratchBuf<uint8_t> data;   // (with its head: the key, size and kind are checked against the file's)
+        data.resize(rec_scope, head_size + d.size);
         {
             std::unique_lock<std::mutex> lk;
             if (mu) lk = std::unique_lock<std::mutex>(*mu);
@@ -574,10 +590,10 @@ void program_cache_read(FILE* in, std::mutex* mu, uint64_t key, const std::vecto
                      (long long)d.at);
             continue;
         }
-        std::vector<uint8_t> plain;
+        ScratchBuf<uint8_t> plain;
         const uint8_t* payload = nullptr;
         size_t payload_size = 0;
-        if (!program_cache_payload(data.data() + head_size, d.size, d.kind, plain, &payload, &payload_size)) {
+        if (!program_cache_payload(data.data() + head_size, d.size, d.kind, rec_scope, plain, &payload, &payload_size)) {
             static std::atomic<int> logged{0};
             if (logged++ < 20)
                 logf("vk: program cache: the compressed record of program %016llx at %lld did not unpack: translated again",

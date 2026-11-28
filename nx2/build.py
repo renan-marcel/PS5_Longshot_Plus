@@ -1600,6 +1600,7 @@ def main():
             "-I" + os.path.join(spirv_headers, "include"), "-I" + os.path.join(spirv_headers, "include", "spirv", "unified1"),
             "-I" + os.path.join(vk_headers, "include"), "-I" + os.path.join(vma_headers, "include"),
             "-I" + vk, "-I" + gen_dir,
+            "-I" + os.path.join(kit.ROOT, "libs", "mem_arena", "include"),
             "-I" + os.path.join(kit.ROOT, "third_party", "zbic")]
         # (the third-party parts' flags: the same, at THIRD_PARTY_CPU, and without the release's define, which none of them
         # reads, so a set made for players fits a developer's build too)
@@ -1627,6 +1628,7 @@ def main():
         vk_lib_deps = tree_headers(os.path.join(vk, "eden"), os.path.join(vk, "sirit"), os.path.join(vk, "compat"),
                                    os.path.join(GPU, "compat"))
         vdeps_roots = (vk, os.path.join(GPU, "render"), os.path.join(GPU, "compat"),
+                       os.path.join(kit.ROOT, "libs", "mem_arena", "include"),
                        os.path.join(GPU, "third_party", "suyu", "video_core", "textures"))
         vdeps = tree_headers(*vdeps_roots)
         output_device_deps = open(os.path.join(HOST, "audio_output_devices.h"), "rb").read()
@@ -1691,6 +1693,12 @@ def main():
         vk_jobs.append((cc, zstd_src, os.path.join(obj_dir, "vk_zstd.o"),
                         target() + THIRD_PARTY_CPU + (["-fPIC"] if LINUX else []) +
                         ["-O2", "-g0", "-DNDEBUG", "-Wno-everything", "-fvisibility=hidden", "-I" + zbic], zstd_deps + tp_deps))
+        if LINUX:
+            mem_arena_inc = os.path.join(kit.ROOT, "libs", "mem_arena", "include")
+            vk_jobs.append((cxx, os.path.join(kit.ROOT, "libs", "mem_arena", "src", "os_mem_posix.cpp"),
+                            os.path.join(obj_dir, "vk_mem_arena_os_mem_posix.o"),
+                            target() + THIRD_PARTY_CPU + ["-fPIC", "-std=c++20", "-O2", "-g0", "-DNDEBUG", "-I" + mem_arena_inc],
+                            tree_headers(mem_arena_inc) + tp_deps))
         if NGX_SDK and not LINUX and toolchain.mingw():
             # (llvm-mingw: NVIDIA's static library was built with Microsoft's compiler for its static runtime (/MT). What it asks
             # of that runtime: the C parts as for the static FFmpeg (host/mingw_msvc_shims.c), the C++ ones in vk_ngx_msvc_rt.cpp)
