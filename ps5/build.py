@@ -139,12 +139,14 @@ def jobs_for(rt64, gen_dir):
                     "-I" + os.path.join(spirv, "include"), "-I" + os.path.join(spirv, "include", "spirv", "unified1"),
                     "-I" + os.path.join(pkg("vulkanheaders", "v1.4.345"), "include"), "-I" + VK, "-I" + gen_dir,
                     "-I" + os.path.join(pkg("vulkanmemoryallocator", "v3.3.0"), "include"),
+                    "-I" + os.path.join(ROOT, "libs", "mem_arena", "include"),
                     # (zstd.h: the console's zstd, as the fonts and the runtime read with, not third_party/zbic's second copy)
                     "-I" + os.path.join(DEPS, "zstd", "include")]
     # (the stamp nx2/build.py compiles in: nx2/translator_files.py names the files it is made of)
     shader_stamp = "-DLONGSHOT_SHADER_STAMP=0x%sull" % translator_files.stamp(VK)
     lib_digest = tree_digest(os.path.join(VK, "eden"), os.path.join(VK, "sirit"), os.path.join(VK, "compat"))
     vk_digest = tree_digest(VK, os.path.join(ROOT, "gpu", "compat"), os.path.join(ROOT, "gpu", "render"), POSIX, PS5,
+                            os.path.join(ROOT, "libs", "mem_arena", "include"),
                             os.path.join(ROOT, "gpu", "third_party", "suyu", "video_core", "textures"))
     # Dear ImGui (the menu and the overlays: vk_imgui.cpp, vk_menu.cpp), as nx2/build.py compiles it; the game's font files
     # are zstd frames, read with the console's zstd (ps5/tools/build-zstd.sh), not third_party/zstd's second copy
@@ -188,6 +190,12 @@ def jobs_for(rt64, gen_dir):
     # Native Vulkan AMD FSR 4.1.2 static compute-replay backend (gpu/vk/fsr4/fsr411.cpp, GPL-2.0-or-later)
     out.append((os.path.join(VK, "fsr4", "fsr411.cpp"), os.path.join(OUT, "obj", "fsr4_fsr411.o"),
                 vfl + ["-include", os.path.join(VK, "vk_loader.h"), "-I" + os.path.join(VK, "fsr4")], vk_digest))
+    # mem_arena POSIX backend (libs/mem_arena/src/os_mem_posix.cpp) for LONGSHOT_ZONE_SCRATCH_ARENA
+    mem_arena_inc = os.path.join(ROOT, "libs", "mem_arena", "include")
+    out.append((os.path.join(ROOT, "libs", "mem_arena", "src", "os_mem_posix.cpp"),
+                os.path.join(OUT, "obj", "mem_arena_os_mem_posix.o"),
+                COMMON + [MKDIR, "-I" + POSIX, "-D_GNU_SOURCE", "-std=c++20", "-O2", "-DNDEBUG", "-I" + mem_arena_inc],
+                tree_digest(mem_arena_inc)))
     if HAS_MIHAWKGEN:   # (its Vulkan calls through the back end's loaded pointers: vk_loader.h, as every unit of gpu/vk)
         mfl = vfl + ["-include", os.path.join(VK, "vk_loader.h"), "-I" + os.path.join(MIHAWKGEN, "framegen", "include"),
                      "-I" + os.path.join(MIHAWKGEN, "framegen", "src")]
