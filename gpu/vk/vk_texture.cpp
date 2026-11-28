@@ -4394,6 +4394,65 @@ static void tags_count() {
     hos_ps5_logfile("memory.txt", line);
 }
 #endif
+
+}   // namespace mkwvk
+#ifndef _WIN32
+extern "C" {
+int asset_prefetch_zone_wanted_for(int zone_idx, const char* path) __attribute__((weak));
+int asset_tags_lookup(uint64_t addr) __attribute__((weak));
+const char* asset_tags_path(int id) __attribute__((weak));
+}
+#endif
+namespace mkwvk {
+
+static std::atomic<int> g_pending_zone_evict{-1};
+static std::atomic<uint64_t> g_zone_evicted_tex{0};
+static std::atomic<uint64_t> g_zone_evicted_bytes{0};
+
+static void evict_unwanted_zone(int target_zone, uint64_t completed) {
+#ifndef _WIN32
+    if (target_zone < 0 || !asset_prefetch_zone_wanted_for || !asset_tags_lookup || !asset_tags_path) return;
+    uint32_t evicted_count = 0;
+    uint64_t evicted_bytes = 0;
+    for (auto it = textures.begin(); it != textures.end();) {
+        Texture* tex = it->second.get();
+        if (!tex || !tex->guest || tex->gpu_written) {
+            ++it;
+            continue;
+        }
+        if (tex->last_value > completed || (rec_value && tex->last_value == rec_value)) {
+            ++it;
+            continue;
+        }
+        const int tag_id = asset_tags_lookup(tex->guest);
+        if (tag_id <= 0) {
+            ++it;
+            continue;
+        }
+        const char* path = asset_tags_path(tag_id);
+        if (!path || !*path || asset_prefetch_zone_wanted_for(target_zone, path) != 0) {
+            ++it;
+            continue;
+        }
+        const uint64_t sz = tex->bytes + tex->pad;
+        destroy_later(*tex);
+        forget_gpu(tex);
+        it = textures.erase(it);
+        evicted_count++;
+        evicted_bytes += sz;
+    }
+    if (evicted_count > 0) {
+        g_zone_evicted_tex.fetch_add(evicted_count, std::memory_order_relaxed);
+        g_zone_evicted_bytes.fetch_add(evicted_bytes, std::memory_order_relaxed);
+        logf("[ZONE_EVICT] target_zone=%d evicted_tex=%u evicted_mb=%u",
+             target_zone, evicted_count, (unsigned)(evicted_bytes >> 20));
+    }
+#else
+    (void)target_zone;
+    (void)completed;
+#endif
+}
+
 void texture_frame(uint64_t completed) {
 #ifdef __PROSPERO__
     if (__atomic_exchange_n(&rx_vk_tags_wanted, 0, __ATOMIC_ACQ_REL)) tags_count();
@@ -4411,6 +4470,8 @@ void texture_frame(uint64_t completed) {
                  (long long)st_deferred.load(std::memory_order_relaxed));
     }
     completed_value = completed;
+    const int pending_zone = g_pending_zone_evict.exchange(-1, std::memory_order_acq_rel);
+    if (pending_zone >= 0) evict_unwanted_zone(pending_zone, completed);
     frame_no++;
     drawn_writeback_frame();
     {   // (staging arenas the GPU is done with, beyond 256 MB of them, and any over 64 MB: freed. A scene change stages
@@ -5401,3 +5462,14 @@ void texture_read_texels(const nvn_tex* t, unsigned level, unsigned layer0, cons
 }
 
 } // namespace mkwvk
+
+extern "C" void rx_vk_evict_unwanted_zone(int target_zone) {
+    static const bool enabled = env_on("LONGSHOT_ZONE_TEX_EVICT");
+    if (!enabled || target_zone < 0) return;
+    mkwvk::g_pending_zone_evict.store(target_zone, std::memory_order_release);
+}
+
+extern "C" void rx_vk_zone_evict_stats(uint64_t* out_tex_count, uint64_t* out_bytes) {
+    if (out_tex_count) *out_tex_count = mkwvk::g_zone_evicted_tex.load(std::memory_order_relaxed);
+    if (out_bytes) *out_bytes = mkwvk::g_zone_evicted_bytes.load(std::memory_order_relaxed);
+}

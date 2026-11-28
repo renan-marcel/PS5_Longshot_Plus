@@ -245,3 +245,12 @@ void texture_read_texels(const nvn_tex* t, unsigned level, unsigned layer0, cons
 void helper_thread_start();
 
 } // namespace mkwvk
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+void rx_vk_evict_unwanted_zone(int target_zone);
+void rx_vk_zone_evict_stats(uint64_t *out_tex_count, uint64_t *out_bytes);
+#ifdef __cplusplus
+}
+#endif
